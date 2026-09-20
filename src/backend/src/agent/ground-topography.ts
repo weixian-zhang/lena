@@ -1,4 +1,5 @@
-import type { AfterToolCallContext, AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AfterToolCallContext } from "@mariozechner/pi-agent-core";
+import type { AgentMessage } from "./types.js";
 import { formatTopography, getCachedTopography, invalidateTopography } from "./topography.js";
 import { isMutatingCommand } from "./tools/bash.js";
 

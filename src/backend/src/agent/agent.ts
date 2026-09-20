@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { DefaultAzureCredential, getBearerTokenProvider } from "@azure/identity";
 import { Agent, type AgentTool } from "@mariozechner/pi-agent-core";
 import { streamSimple, type Model } from "@mariozechner/pi-ai";
+import { CONTEXT_WINDOW_TOKENS, MAX_OUTPUT_TOKENS } from "../util/config.js";
 import { injectTopography, invalidateTopographyAfterMutation } from "./ground-topography.js";
 
 // Load src/backend/.env into process.env for local development
@@ -100,13 +101,13 @@ export function createSelfHostedModel(
     id: deploymentName,
     name: deploymentName,
     api: "openai-completions",
-    provider: PROVIDER_ID,
+    provider: deploymentName,
     baseUrl: toBaseURL(endpoint),
     reasoning: false,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 200_000,
-    maxTokens: 32_768, // compaction
+    contextWindow: CONTEXT_WINDOW_TOKENS,
+    maxTokens: MAX_OUTPUT_TOKENS,
   };
 }
 

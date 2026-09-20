@@ -32,23 +32,3 @@ not the "what"; don't restate the code or write essay-length block headers.
 ## TypeScript conventions
 
 - Data structures / DTOs → `type`, not `interface`.
-
-
-## Reference codebases
-
-Read-only prior art, inspiration only. Don't copy designs/code. Challenge their approaches — if
-heavier/weaker/poor fit, say so and adopt better solution. Disagreeing is expected.
-
-- OpenClaw — `/Users/weixianzhang/projects/open_source/openclaw`
-- Hermes agent— `/Users/weixianzhang/projects/open_source/hermes-agent`
-
-Read both for (compare takes):
-
-- Agent harness — loop, execution env abstraction, run lifecycle/phases.
-- Context assembly — context window budgeting per run (system prompt, history, tool schemas),
-  compaction/pruning.
-- Session management — persistence (append-only JSONL trees), forking/replay, isolation.
-- Channels — deterministic routing: inbound message → agent + session key. Model never picks
-  channel.
-- Gateway — transport layer (e.g. WebSocket) fronting all channels, separate from agent logic.
-- switchboard - chat, cron job, subagent (future) commands/messages to concurrently processed by pi-core-agents concurrently with no race condition

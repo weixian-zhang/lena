@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { lenaHome } from "../cwd.js";
+import { lenaHome } from "../util/cwd.js";
 
 // ---------------------------------------------------------------------------
 // Cloud shell — the one authenticated surface Lena runs commands through.
