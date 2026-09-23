@@ -4,30 +4,38 @@ Guidance for Claude Code in this repo.
 
 ## What this is
 
-Lena = Azure cloud exengineering pert agent. User chats in natural language; Lena does everything on Azure:
-design, provisioning, troubleshooting (apps + config), operations (patch mgmt, monitoring, more).
-End-to-end execution: resource search, data analysis, ETL, deploy, Sentinel threat hunting, etc.
+Lena = Azure cloud engineering expert agent. The user chats in natural language; Lena executes on
+Azure end to end: design, provisioning, troubleshooting (apps + config), operations (patching,
+monitoring), resource search, data analysis, ETL, deploy, Sentinel threat hunting.
 **Never deletes Azure resources** — out of scope by design; decline or escalate instead.
 
 ## Tech stack
 
-- Node.js latest (LTS/current) + TypeScript. Modern built-ins: native fetch, `node:` imports, ESM.
+- Node.js latest + TypeScript, ESM. Modern built-ins: native fetch, `node:` imports.
   Runtime code → `packages/backend`.
-- Agent loop = pi-agent-core's `Agent` (`new Agent({...})` in `packages/backend/src/agent/agent.ts`),
-  used as an npm dependency — not a hand-rolled loop. It drives the native tool_use cycle;
-  `toolExecution: "sequential"`. (Still a dependency, never vendored/forked.)
-- Backend-only for now. No UI code. Keep streamed event channel contract clean so frontend can
-  attach later.
-- Backend hosted on Azure. Config/secrets/provider selection injectable via env/config, not baked in.
-  not the app language.
-- Greenfield: `packages/backend` empty, no package.json/build/lint/test yet. You're establishing
-  conventions, not following them. Prior discarded approach: git history of
-  `feat/task_runner_overseer`.
+- Agent loop = pi-agent-core's `Agent` (`packages/backend/src/agent/agent.ts`), used as an npm
+  dependency — never hand-rolled, vendored or forked. It drives the native tool_use cycle with
+  `toolExecution: "sequential"`.
+- Backend only, no UI. Keep the streamed event contract clean so a frontend can attach later.
+- Hosted on Azure. Config, secrets and provider selection are injected via env/config, never
+  baked in.
+- Prior discarded approach: git history of `feat/task_runner_overseer`.
 
 ## Code comments
 
-Keep them short — a one or two line note on the gist is enough. Comment the non-obvious "why",
-not the "what"; don't restate the code or write essay-length block headers.
+One or two lines, never more than three. Explain the non-obvious "why", not the "what".
+
+## Naming
+
+Function names say what the function does. Longer is fine when it carries the meaning.
+
+## Scope
+
+Build what was asked and nothing beyond it. Keep implementations simple and concise.
+
+## File layout
+
+Exported functions and types at the top, private helpers at the bottom.
 
 ## TypeScript conventions
 

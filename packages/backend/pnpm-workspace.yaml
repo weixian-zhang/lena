@@ -1,0 +1,11 @@
+packages:
+  - '.'
+
+# pnpm blocks dependency postinstall scripts unless listed here. better-sqlite3
+# is a native module and esbuild (via vitest/tsx) needs its platform binary; the
+# other two reach us only through pi-ai's unused Google provider.
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  '@google/genai': false
+  protobufjs: false
