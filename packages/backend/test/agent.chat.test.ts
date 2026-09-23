@@ -8,7 +8,7 @@ import { tools } from "../src/agent/tools/index.js";
 // Live smoke test: drives the real Lena agent (self-hosted Foundry model + managed-
 // identity auth) through one short Investigate-mode chat and checks it answers.
 // It hits the network, so it SKIPS when the model endpoint isn't configured rather
-// than failing — run it locally with src/backend/.env populated.
+// than failing — run it locally with packages/backend/.env populated.
 
 // agent.ts loads .env from a build-relative path; load the backend .env here too so
 // the config + credentials resolve when the test runs from source.

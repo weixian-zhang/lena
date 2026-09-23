@@ -30,7 +30,7 @@ swapping it for a raw SDK later means replacing one injected function.
 ## Module layout
 
 ```
-src/backend/src/agent-core/
+packages/backend/src/agent-core/
   types.ts    contracts — no imports from the rest of the repo
   loop.ts     turn(), step(), runToolCall()
 ```

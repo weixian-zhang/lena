@@ -5,7 +5,7 @@ import { streamSimple, type Model } from "@mariozechner/pi-ai";
 import { CONTEXT_WINDOW_TOKENS, MAX_OUTPUT_TOKENS } from "../util/config.js";
 import { injectTopography, invalidateTopographyAfterMutation } from "./ground-topography.js";
 
-// Load src/backend/.env into process.env for local development
+// Load packages/backend/.env into process.env for local development
 try {
   process.loadEnvFile(join(import.meta.dirname, "..", ".env"));
 } catch {
