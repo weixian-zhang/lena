@@ -14,7 +14,7 @@ import { tools } from "../src/agent/tools/index.js";
 //
 // It deliberately does NOT clean up: Lena never deletes Azure resources (CLAUDE.md),
 // and the test harness doesn't either — this asserts the provisioning *flow*, not a
-// throwaway resource lifecycle. Run it locally with src/backend/.env populated; it
+// throwaway resource lifecycle. Run it locally with packages/backend/.env populated; it
 // hits the network and SKIPS (rather than fails) when the model endpoint is unset.
 
 // agent.ts loads .env from a build-relative path; load the backend .env here too so
