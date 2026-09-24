@@ -11,7 +11,6 @@ export type {
   LLMMessage,
   LLMRequest,
   LLMStopReason,
-  LLMTool,
   LLMToolCall,
   LLMUsage,
 } from "./types.js";

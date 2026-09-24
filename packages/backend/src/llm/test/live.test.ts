@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { expect, test } from "vitest";
+import { createToolbox } from "../../tool/index.js";
 import { createFoundryTokenProvider, createLLM, createModel } from "../index.js";
 import type { FoundryAuth, LLMEvent } from "../types.js";
 
@@ -68,13 +69,14 @@ test.skipIf(!configured())("streams a reply from Foundry", { timeout: 120_000 },
 
 test.skipIf(!configured())("asks for a tool call and accepts the result", { timeout: 120_000 }, async () => {
   const llm = createLLM({ model: foundryModel(), getToken: createFoundryTokenProvider(servicePrincipal()) });
-  const tools = [
+  const tools = createToolbox([
     {
       name: "get_weather",
       description: "Current weather for a city.",
       parameters: Type.Object({ city: Type.String() }),
+      execute: async () => "31 degrees and sunny",
     },
-  ];
+  ]);
 
   const asked = await collectEvents(
     llm.stream({
@@ -100,7 +102,7 @@ test.skipIf(!configured())("asks for a tool call and accepts the result", { time
           role: "toolResult",
           toolCallId: call.call.id,
           toolName: call.call.name,
-          content: "31 degrees and sunny",
+          content: await tools.get(call.call.name).execute(call.call.arguments),
           isError: false,
         },
       ],
@@ -116,7 +118,7 @@ test.skipIf(!configured())("asks for a tool call and accepts the result", { time
 
 test.skipIf(!configured())("fills in every tool parameter", { timeout: 120_000 }, async () => {
   const llm = createLLM({ model: foundryModel(), getToken: createFoundryTokenProvider(servicePrincipal()) });
-  const tools = [
+  const tools = createToolbox([
     {
       name: "convert_currency",
       description: "Convert an amount from one currency to another.",
@@ -125,8 +127,9 @@ test.skipIf(!configured())("fills in every tool parameter", { timeout: 120_000 }
         from: Type.String({ description: "ISO currency code, e.g. USD" }),
         to: Type.String({ description: "ISO currency code, e.g. AUD" }),
       }),
+      execute: async () => "152.40",
     },
-  ];
+  ]);
   const ask = "Convert 100 USD to AUD. Use the tool.";
 
   const asked = await collectEvents(llm.stream({ tools, messages: [{ role: "user", content: ask }] }));
@@ -147,7 +150,7 @@ test.skipIf(!configured())("fills in every tool parameter", { timeout: 120_000 }
           role: "toolResult",
           toolCallId: call.call.id,
           toolName: call.call.name,
-          content: "152.40",
+          content: await tools.get(call.call.name).execute(call.call.arguments),
           isError: false,
         },
       ],

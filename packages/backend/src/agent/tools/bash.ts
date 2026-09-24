@@ -24,7 +24,7 @@ export type BashToolInput = Static<typeof schema>;
  * of how the command is phrased. This regex just catches the common cases early with
  * a clear message and gives us something to log.
  */
-const DELETION_PATTERN =
+export const DELETION_PATTERN =
   /\b(rm\s+-[a-z]*[rf]|rmdir|az\b[^|;&]*\bdelete\b|--method[= ]+delete|-X[= ]*delete|\bpurge\b)/i;
 
 /**

@@ -1,4 +1,4 @@
-import type { TSchema } from "typebox";
+import type { Toolbox } from "../tool/index.js";
 
 /**
  * Lena's own LLM surface. Callers depend on these types, never on pi-ai's —
@@ -19,13 +19,6 @@ export type FoundryAuth =
   /** A user's token from an `az login --use-device-code` sign-in done elsewhere.
    *  Must already be scoped to Foundry — a token for ARM looks identical here. */
   | { kind: "deviceCodeUserToken"; token: string };
-
-/** A tool the model may call. `parameters` is a typebox schema. */
-export type LLMTool = {
-  name: string;
-  description: string;
-  parameters: TSchema;
-};
 
 /** A tool invocation the model asked for. */
 export type LLMToolCall = {
@@ -54,7 +47,7 @@ export type LLMMessage =
 export type LLMRequest = {
   systemPrompt?: string;
   messages: LLMMessage[];
-  tools?: LLMTool[];
+  tools?: Toolbox;
   signal?: AbortSignal;
   temperature?: number;
   maxTokens?: number;

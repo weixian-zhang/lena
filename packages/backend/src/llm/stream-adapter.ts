@@ -28,7 +28,8 @@ export function toPiContext(request: LLMRequest, model: Model<Api>): Context {
   return {
     systemPrompt: request.systemPrompt,
     messages: request.messages.map((message) => toPiMessage(message, model)),
-    tools: request.tools?.map((tool): Tool => ({ ...tool })),
+    // Explicit pick so a tool's `execute` never reaches pi-ai.
+    tools: request.tools?.list().map(({ name, description, parameters }): Tool => ({ name, description, parameters })),
   };
 }
 
