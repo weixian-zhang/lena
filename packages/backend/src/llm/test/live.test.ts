@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { expect, test } from "vitest";
-import { createLLM, createModel } from "../index.js";
+import { createFoundryTokenProvider, createLLM, createModel } from "../index.js";
 import type { FoundryAuth, LLMEvent } from "../types.js";
 
 // Live test: hits the real Foundry endpoint with a real Entra token. It is the
@@ -16,23 +16,22 @@ try {
 
 function configured(): boolean {
   return Boolean(
-    process.env.MICROSOFT_FOUNDRY_ENDPOINT &&
-      process.env.MICROSOFT_FOUNDRY_DEPLOYMENT_NAME &&
+    process.env.LLM_ENDPOINT &&
+      process.env.LLM_MODEL_ID &&
       process.env.AZURE_CLIENT_SECRET,
   );
 }
 
 /**
- * Build the model the generic way rather than letting createLLM derive
- * it, so the live endpoint proves createModel's output — not just the Foundry
- * shortcut. Foundry is an OpenAI provider under the hood, hence "openai".
+ * Build the Foundry model through createModel, so the live endpoint proves its
+ * output. Foundry is an OpenAI provider under the hood, hence "openai".
  */
 function foundryModel() {
-  const endpoint = process.env.MICROSOFT_FOUNDRY_ENDPOINT?.replace(/\/+$/, "") ?? "";
+  const endpoint = process.env.LLM_ENDPOINT?.replace(/\/+$/, "") ?? "";
   return createModel({
     provider: "openai",
     api: "openai-responses",
-    id: process.env.MICROSOFT_FOUNDRY_DEPLOYMENT_NAME ?? "",
+    id: process.env.LLM_MODEL_ID ?? "",
     baseUrl: endpoint.endsWith("/openai/v1") ? endpoint : `${endpoint}/openai/v1`,
   });
 }
@@ -48,7 +47,7 @@ function servicePrincipal(): FoundryAuth {
 }
 
 test.skipIf(!configured())("streams a reply from Foundry", { timeout: 120_000 }, async () => {
-  const llm = createLLM({ model: foundryModel(), auth: servicePrincipal() });
+  const llm = createLLM({ model: foundryModel(), getToken: createFoundryTokenProvider(servicePrincipal()) });
 
   const events = await collectEvents(
     llm.stream({
@@ -68,7 +67,7 @@ test.skipIf(!configured())("streams a reply from Foundry", { timeout: 120_000 },
 });
 
 test.skipIf(!configured())("asks for a tool call and accepts the result", { timeout: 120_000 }, async () => {
-  const llm = createLLM({ model: foundryModel(), auth: servicePrincipal() });
+  const llm = createLLM({ model: foundryModel(), getToken: createFoundryTokenProvider(servicePrincipal()) });
   const tools = [
     {
       name: "get_weather",
@@ -116,7 +115,7 @@ test.skipIf(!configured())("asks for a tool call and accepts the result", { time
 });
 
 test.skipIf(!configured())("fills in every tool parameter", { timeout: 120_000 }, async () => {
-  const llm = createLLM({ model: foundryModel(), auth: servicePrincipal() });
+  const llm = createLLM({ model: foundryModel(), getToken: createFoundryTokenProvider(servicePrincipal()) });
   const tools = [
     {
       name: "convert_currency",

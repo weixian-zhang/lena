@@ -36,6 +36,7 @@ Build what was asked and nothing beyond it. Keep implementations simple and conc
 ## File layout
 
 Exported functions and types at the top, private helpers at the bottom.
+In test files, the `test(...)` cases come first and their helper functions below them.
 
 ## TypeScript conventions
 
