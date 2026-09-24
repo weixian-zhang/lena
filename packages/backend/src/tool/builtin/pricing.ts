@@ -1,18 +1,15 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { type Static, Type } from "typebox";
-import { createMcpSession, extractText } from "./mcp-server.js";
+import type { Tool } from "../types.js";
+import { createMcpSession, extractText } from "./azure-mcp.js";
 
 /** Milliseconds to allow a single pricing call before giving up. */
 const CALL_TIMEOUT_MS = 60_000;
 
-// Azure retail pricing via the Azure MCP server's `pricing` namespace (tool
-// `pricing_get`). Reuses the shared MCP session helper, scoped to its own namespace
-// so its tool list stays small. Read-only — it queries the public retail rate card,
-// never account-specific spend.
-const getPricingSession = createMcpSession({
-  namespace: "pricing",
-  tool: { filter: "pricing" },
-});
+/** The Azure MCP `pricing` namespace tool that reads the public retail rate card. */
+const PRICING_TOOL_NAME = "pricing_get";
+
+// Read-only — it queries the public retail rate card, never account-specific spend.
+const pricingMcpClient = createMcpSession({ namespace: "pricing", toolName: PRICING_TOOL_NAME });
 
 const schema = Type.Object({
   sku: Type.Optional(
@@ -47,7 +44,37 @@ const schema = Type.Object({
   ),
 });
 
-export type AzurePricingInput = Static<typeof schema>;
+type AzurePricingInput = Static<typeof schema>;
+
+export const azurePricingTool: Tool<typeof schema> = {
+  name: "azure_pricing",
+  description:
+    "Look up Azure retail (pay-as-you-go) pricing from Azure's public rate card — for cost " +
+    "estimation and SKU/region comparisons. Read-only; returns rates, not a bill. Requires at " +
+    "least one of `sku`, `service`, `region`, `serviceFamily`, or `filter` — for an accurate " +
+    "number ask the user for the exact SKU/tier rather than guessing. Prefer `sku` (+ `region`) " +
+    "for a specific rate. For a monthly estimate, multiply an hourly Consumption price by 730.",
+  parameters: schema,
+  async execute(input, abortSignal) {
+    if (!hasScopingFilter(input)) {
+      throw new Error(
+        "azure_pricing needs at least one of: sku, service, region, serviceFamily, or filter. " +
+          "Ask the user for a specific SKU or service before querying.",
+      );
+    }
+
+    const client = await pricingMcpClient();
+    const result = await client.callTool(
+      { name: PRICING_TOOL_NAME, arguments: toMcpArguments(input) },
+      undefined,
+      { signal: abortSignal, timeout: CALL_TIMEOUT_MS },
+    );
+
+    const text = extractText(result.content);
+    if (result.isError) throw new Error(text || "azure_pricing failed without an error message.");
+    return text || "(no pricing data returned)";
+  },
+};
 
 /** MCP option keys are kebab-case; map our camelCase inputs onto them, dropping unset ones. */
 function toMcpArguments(input: AzurePricingInput): Record<string, string> {
@@ -69,41 +96,3 @@ function toMcpArguments(input: AzurePricingInput): Record<string, string> {
 function hasScopingFilter(input: AzurePricingInput): boolean {
   return Boolean(input.sku || input.service || input.region || input.serviceFamily || input.filter);
 }
-
-export const azurePricingTool: AgentTool<typeof schema> = {
-  name: "azure_pricing",
-  label: "azure pricing",
-  description:
-    "Look up Azure retail (pay-as-you-go) pricing from Azure's public rate card — for cost " +
-    "estimation and SKU/region comparisons. Read-only; returns rates, not a bill. Requires at " +
-    "least one of `sku`, `service`, `region`, `serviceFamily`, or `filter` — for an accurate " +
-    "number ask the user for the exact SKU/tier rather than guessing. Prefer `sku` (+ `region`) " +
-    "for a specific rate. For a monthly estimate, multiply an hourly Consumption price by 730.",
-  parameters: schema,
-  async execute(_toolCallId, input, signal) {
-    if (!hasScopingFilter(input)) {
-      throw new Error(
-        "azure_pricing needs at least one of: sku, service, region, serviceFamily, or filter. " +
-          "Ask the user for a specific SKU or service before querying.",
-      );
-    }
-
-    const { client, toolName } = await getPricingSession();
-    const result = await client.callTool(
-      { name: toolName, arguments: toMcpArguments(input) },
-      undefined,
-      { signal, timeout: CALL_TIMEOUT_MS },
-    );
-
-    const text = extractText(result.content);
-    // Throw on failure, never return an error string as content (see CLAUDE.md).
-    if (result.isError) {
-      throw new Error(text || "azure_pricing failed without an error message.");
-    }
-
-    return {
-      content: [{ type: "text", text: text || "(no pricing data returned)" }],
-      details: undefined,
-    };
-  },
-};
