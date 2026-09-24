@@ -3,10 +3,10 @@ import { expect, test } from "vitest";
 import { createToolbox } from "../toolbox.js";
 import type { Tool } from "../types.js";
 
-test("list keeps the order the tools were given", () => {
+test("toJson keeps the order the tools were given", () => {
   const toolbox = createToolbox([echoTool("a"), echoTool("b")]);
 
-  expect(toolbox.list().map((tool) => tool.name)).toEqual(["a", "b"]);
+  expect(JSON.parse(toolbox.toJson()).map((tool: { name: string }) => tool.name)).toEqual(["a", "b"]);
 });
 
 test("get returns the tool by name and it runs", async () => {

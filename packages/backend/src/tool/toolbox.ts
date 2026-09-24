@@ -2,11 +2,9 @@ import type { Tool } from "./types.js";
 
 /** The tools one agent can use, looked up by the name the model calls them by. */
 export type Toolbox = {
-  /** Every tool, in the order given. */
-  list(): Tool[];
   /** The tool called `name`; throws naming it when unknown. */
   get(name: string): Tool;
-  /** The tools' name, description and parameters as JSON — for logs and display. */
+  /** The tools' name, description and parameters as JSON, in the order given. */
   toJson(): string;
 };
 
@@ -19,7 +17,6 @@ export function createToolbox(tools: Tool[]): Toolbox {
   }
 
   return {
-    list: () => [...toolsByName.values()],
     get(name) {
       const tool = toolsByName.get(name);
       if (!tool) throw new Error(`Unknown tool: "${name}".`);

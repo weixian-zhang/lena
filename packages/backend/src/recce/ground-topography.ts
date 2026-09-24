@@ -1,7 +1,7 @@
 import type { AfterToolCallContext } from "@mariozechner/pi-agent-core";
-import type { AgentMessage } from "./types.js";
+import type { AgentMessage } from "../agent/types.js";
 import { formatTopography, getCachedTopography, invalidateTopography } from "./topography.js";
-import { isMutatingCommand } from "./tools/bash.js";
+import { isMutatingCommand } from "../agent/tools/bash.js";
 
 // ---------------------------------------------------------------------------
 // Grounding — inject a fresh Azure topography snapshot into every model call so

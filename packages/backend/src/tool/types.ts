@@ -9,5 +9,5 @@ export type Tool<TParameters extends TSchema = TSchema> = {
    * Returns the result text for the model; throws on failure. Method syntax keeps
    * `args` bivariant, so a `Tool<typeof schema>` fits a `Tool[]` without a cast.
    */
-  execute(args: Static<TParameters>, signal?: AbortSignal): Promise<string>;
+  execute(args: Static<TParameters>, abortSignal?: AbortSignal): Promise<string>;
 };

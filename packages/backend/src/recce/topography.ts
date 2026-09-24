@@ -1,4 +1,4 @@
-import { type AzureSession, getAzureSession, runShell } from "./cloud-shell.js";
+import { type AzureSession, getAzureSession, runShell } from "../agent/cloud-shell.js";
 
 // ---------------------------------------------------------------------------
 // Topography — a read-only snapshot of the Azure environment Lena can see.

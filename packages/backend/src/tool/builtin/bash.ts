@@ -25,7 +25,7 @@ export const bashTool: Tool<typeof schema> = {
     "run `node x.mjs` — that keeps the shell from touching the source, and gives real line " +
     "numbers in stack traces. Deleting Azure resources is out of scope and blocked.",
   parameters: schema,
-  async execute({ command, timeout }, signal) {
+  async execute({ command, timeout }, abortSignal) {
     if (DELETION_PATTERN.test(command)) {
       throw new Error(
         "Deletion is out of scope by design and is blocked. If the user needs a resource " +
@@ -34,7 +34,7 @@ export const bashTool: Tool<typeof schema> = {
     }
 
     const { env, cwd } = await getAzureSession();
-    const { stdout, exitCode, truncated } = await runShell(command, { cwd, env, signal, timeout });
+    const { stdout, exitCode, truncated } = await runShell(command, { cwd, env, abortSignal, timeout });
 
     const suffix = truncated
       ? `\n\n[output truncated at ${MAX_OUTPUT_BYTES / 1000} KB — narrow the query with --query, -o tsv, or a filter]`

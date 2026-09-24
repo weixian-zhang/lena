@@ -31,7 +31,7 @@ export type RunShellOptions = {
   /** Environment for the child process (carries `AZURE_CONFIG_DIR`, secrets, PATH). */
   env: NodeJS.ProcessEnv;
   /** Aborts the command and kills its process tree when signalled. */
-  signal?: AbortSignal;
+  abortSignal?: AbortSignal;
   /** Timeout in seconds. Omit or `0` for no timeout. */
   timeout?: number;
 };
@@ -58,8 +58,8 @@ export type RunShellResult = {
  * per the tool contract in CLAUDE.md).
  */
 export function runShell(command: string, options: RunShellOptions): Promise<RunShellResult> {
-  const { cwd, env, signal, timeout } = options;
-  if (signal?.aborted) return Promise.reject(new Error("aborted"));
+  const { cwd, env, abortSignal, timeout } = options;
+  if (abortSignal?.aborted) return Promise.reject(new Error("aborted"));
 
   return new Promise<RunShellResult>((resolve, reject) => {
     const child = spawn(SHELL, ["-c", command], {
@@ -104,7 +104,7 @@ export function runShell(command: string, options: RunShellOptions): Promise<Run
 
     const cleanup = () => {
       if (timer) clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
+      abortSignal?.removeEventListener("abort", onAbort);
     };
 
     child.stdout.on("data", onData);
@@ -116,7 +116,7 @@ export function runShell(command: string, options: RunShellOptions): Promise<Run
         kill();
       }, timeout * 1000);
     }
-    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+    if (abortSignal) abortSignal.addEventListener("abort", onAbort, { once: true });
 
     child.on("error", (err) => {
       cleanup();
@@ -125,7 +125,7 @@ export function runShell(command: string, options: RunShellOptions): Promise<Run
 
     child.on("close", (code) => {
       cleanup();
-      if (signal?.aborted) return reject(new Error("aborted"));
+      if (abortSignal?.aborted) return reject(new Error("aborted"));
       if (timedOut) return reject(new Error(`Command timed out after ${timeout} seconds`));
       // Decode once at the end so multi-byte UTF-8 is never split across chunks.
       resolve({ stdout: Buffer.concat(chunks).toString("utf8"), exitCode: code, truncated });
