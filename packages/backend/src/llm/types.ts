@@ -15,7 +15,10 @@ export type FoundryAuth =
   /** An Entra service principal. The usual choice for local development. */
   | { kind: "servicePrincipal"; tenantId: string; clientId: string; clientSecret: string }
   /** The hosting service's system-assigned managed identity. No secret to store. */
-  | { kind: "systemAssignedManagedIdentity" };
+  | { kind: "systemAssignedManagedIdentity" }
+  /** A user's token from an `az login --use-device-code` sign-in done elsewhere.
+   *  Must already be scoped to Foundry — a token for ARM looks identical here. */
+  | { kind: "deviceCodeUserToken"; token: string };
 
 /** A tool the model may call. `parameters` is a typebox schema. */
 export type LLMTool = {

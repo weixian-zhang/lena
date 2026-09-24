@@ -15,12 +15,14 @@ export const FOUNDRY_SCOPE = "https://ai.azure.com/.default";
 /**
  * Returns a callable yielding the secret to send as the request's bearer
  * credential. Resolved per model call so an Entra token stays fresh across
- * long-running turns; an API key simply resolves to itself.
+ * long-running turns; an already-obtained secret simply resolves to itself.
  */
 export function createFoundryTokenProvider(auth: FoundryAuth): () => Promise<string> {
   switch (auth.kind) {
     case "apiKey":
       return async () => auth.key;
+    case "deviceCodeUserToken":
+      return async () => auth.token;
     case "systemAssignedManagedIdentity":
       return getBearerTokenProvider(new ManagedIdentityCredential(), FOUNDRY_SCOPE);
     case "servicePrincipal":
