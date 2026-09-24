@@ -4,7 +4,7 @@ import { defineConfig } from "vitest/config";
 // from "vitest" rather than globals. Live tests self-skip when unconfigured.
 export default defineConfig({
   test: {
-    include: ["test/**/*.test.ts"],
+    include: ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
     testTimeout: 30_000,
   },
