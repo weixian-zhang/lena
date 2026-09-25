@@ -12,8 +12,8 @@ monitoring), resource search, data analysis, ETL, deploy, Sentinel threat huntin
 ## Tech stack
 
 - Node.js latest + TypeScript, ESM. Modern built-ins: native fetch, `node:` imports.
-  Runtime code → `packages/backend`.
-- Agent loop = pi-agent-core's `Agent` (`packages/backend/src/agent/agent.ts`), used as an npm
+  Runtime code → `apps/gateway-agent` (the app) and `packages/*` (its workspace packages).
+- Agent loop = pi-agent-core's `Agent` (`packages/agent/agent.ts`), used as an npm
   dependency — never hand-rolled, vendored or forked. It drives the native tool_use cycle with
   `toolExecution: "sequential"`.
 - Backend only, no UI. Keep the streamed event contract clean so a frontend can attach later.

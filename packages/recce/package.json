@@ -1,0 +1,20 @@
+{
+  "name": "@lena/recce",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@lena/agent": "workspace:*",
+    "@mariozechner/pi-agent-core": "^0.73.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.0"
+  }
+}

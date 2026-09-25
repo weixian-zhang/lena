@@ -1,6 +1,6 @@
 ---
 name: pi-research
-description: Research the Pi monorepo open-source codebase (on local disk) to answer chat-agent architecture and module-design questions for the lena.azure project. Pi has TWO relationships to lena.azure — keep them separate: `pi-agent-core` / `pi-ai` are npm DEPENDENCIES (call their APIs, never vendor or copy their source), while the Pi harness (`pi-coding-agent`, `agent/src/harness/*`) is a DESIGN reference to reimplement under `packages/backend`. Use for questions about Pi's agent loop, model/provider abstraction, sessions/persistence, context assembly/compaction, harness lifecycle, or backend→frontend streaming — and how those map to lena.azure. Returns a distilled findings brief with cited file paths, not raw file dumps.
+description: Research the Pi monorepo open-source codebase (on local disk) to answer chat-agent architecture and module-design questions for the lena.azure project. Pi has TWO relationships to lena.azure — keep them separate: `pi-agent-core` / `pi-ai` are npm DEPENDENCIES (call their APIs, never vendor or copy their source), while the Pi harness (`pi-coding-agent`, `agent/src/harness/*`) is a DESIGN reference to reimplement under `apps/gateway-agent`. Use for questions about Pi's agent loop, model/provider abstraction, sessions/persistence, context assembly/compaction, harness lifecycle, or backend→frontend streaming — and how those map to lena.azure. Returns a distilled findings brief with cited file paths, not raw file dumps.
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---
@@ -31,7 +31,7 @@ say which one is in play, because the recommendation differs completely:
   **Never** recommend vendoring, forking, or pasting their source into lena.azure.
   For these, your job is to explain *how to use the API*, not how to reimplement it.
 - **Pi Mono harness (`pi-coding-agent`, `agent/src/harness/*`) = DESIGN reference.**
-  Read the concept, then lena.azure builds *its own* version under `packages/backend`.
+  Read the concept, then lena.azure builds *its own* version under `apps/gateway-agent`.
   Do not recommend lifting files. For these, distill the *design*, then judge fit.
 
 Non-negotiables to hold every finding against:
@@ -102,7 +102,7 @@ Confirm against the repo before relying on any of these:
   provider anywhere. (note 02, non-negotiable)
 - **Sessions = append-only JSONL tree** via `id`/`parentId`, resumable/replayable,
   transcript separate from live `AgentState`. Keep replayable to feed
-  `packages/evaluation/*.yaml`. (note 03, DESIGN ref → build own)
+  `apps/gateway-agent/evaluation/*.yaml`. (note 03, DESIGN ref → build own)
 - **Context pipeline** — `AgentMessage[]` → `transformContext()` → `AgentMessage[]`
   → `convertToLlm()` → `Message[]` → LLM. `transformContext` = compaction/pruning/
   external-context injection; `convertToLlm` = filter UI-only messages, map custom
@@ -113,7 +113,7 @@ Confirm against the repo before relying on any of these:
   throws on failure (never error strings as content); `onUpdate` streams long `az`
   commands; `executionMode: "sequential"` for mutations, `parallel` for read-only;
   `beforeToolCall` gates destructive ops. (note 01)
-- **Backend/frontend split** — `packages/backend` hosts `Agent` + creds and streams
+- **Backend/frontend split** — `apps/gateway-agent` hosts `Agent` + creds and streams
   `AgentEvent`s; creds never hit the browser. Use `streamProxy`-style transport only
   if the loop must run client-side. (note 06, DESIGN ref → lena split)
 
