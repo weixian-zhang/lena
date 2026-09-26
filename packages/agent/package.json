@@ -1,0 +1,29 @@
+{
+  "name": "@lena/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@azure/identity": "^4.13.1",
+    "@earendil-works/pi-ai": "^0.85.1",
+    "@lena/recce": "workspace:*",
+    "@lena/tool": "workspace:*",
+    "@lena/util": "workspace:*",
+    "@mariozechner/pi-agent-core": "^0.73.1",
+    "@mariozechner/pi-ai": "^0.73.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "typebox": "^1.3.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.10"
+  }
+}

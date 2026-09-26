@@ -3,12 +3,12 @@
 	"tasks": [
 		{
 			"type": "npm",
-			"script": "build",
-			"path": "packages/backend",
+			"script": "typecheck",
+			"path": "apps/gateway-agent",
 			"group": "build",
 			"problemMatcher": [],
-			"label": "build backend",
-			"detail": "tsc -p tsconfig.json"
+			"label": "typecheck gateway-agent",
+			"detail": "tsc -p tsconfig.json (no emit)"
 		}
 	]
 }

@@ -1,0 +1,25 @@
+{
+  "name": "@lena/session",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./*": "./*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@lena/agent": "workspace:*",
+    "@lena/gateway": "workspace:*",
+    "better-sqlite3": "^12.11.1",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.3.0",
+    "@types/pg": "^8.20.0",
+    "typescript": "^5.9.0"
+  }
+}
