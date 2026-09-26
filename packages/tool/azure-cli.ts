@@ -1,6 +1,6 @@
-import { Type } from "typebox";
-import type { Tool } from "../types.js";
-import { createMcpSession, extractText } from "./azure-mcp.js";
+import { type Static, Type } from "typebox";
+import type { Tool } from "./tool.js";
+import { createMcpSession, extractText } from "./helper/azure-mcp.js";
 
 /** Milliseconds to allow a single generate call before giving up. */
 const CALL_TIMEOUT_MS = 60_000;
@@ -10,7 +10,7 @@ const CLI_GENERATE_TOOL_NAME = "extension_cli_generate";
 
 const azcliMcpClient = createMcpSession({ namespace: "extension", toolName: CLI_GENERATE_TOOL_NAME });
 
-const schema = Type.Object({
+const paramSchema = Type.Object({
   intent: Type.String({
     description:
       "Natural-language description of the Azure goal to accomplish, e.g. " +
@@ -25,15 +25,16 @@ const schema = Type.Object({
  * Returns command text only — no side effects; run it with `bash`. `cli-type` is
  * pinned to `az` since that's the only CLI Lena executes.
  */
-export const azureCliGenerateTool: Tool<typeof schema> = {
-  name: "azure_cli_generate",
-  description:
+export class AzureCliGenerateTool implements Tool<typeof paramSchema> {
+  readonly name = "azure_cli_generate";
+  readonly description =
     "Generate the exact Azure CLI (`az`) command for a described goal, using Azure's own " +
     "up-to-date CLI knowledge. Returns command TEXT only — it does not execute anything, so " +
     "run the result with the `bash` tool. Use it when unsure of exact `az` syntax, flags, or " +
-    "the newest command shape.",
-  parameters: schema,
-  async execute({ intent }, abortSignal) {
+    "the newest command shape.";
+  readonly parameters = paramSchema;
+
+  async execute({ intent }: Static<typeof paramSchema>, abortSignal?: AbortSignal): Promise<string> {
     const client = await azcliMcpClient();
 
     const result = await client.callTool(
@@ -45,5 +46,5 @@ export const azureCliGenerateTool: Tool<typeof schema> = {
     const text = extractText(result.content);
     if (result.isError) throw new Error(text || "azure_cli_generate failed without an error message.");
     return text || "(no command generated)";
-  },
-};
+  }
+}

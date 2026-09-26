@@ -1,6 +1,6 @@
 import { type Static, Type } from "typebox";
-import type { Tool } from "../types.js";
-import { createMcpSession, extractText } from "./azure-mcp.js";
+import type { Tool } from "./tool.js";
+import { createMcpSession, extractText } from "./helper/azure-mcp.js";
 
 /** Milliseconds to allow a single pricing call before giving up. */
 const CALL_TIMEOUT_MS = 60_000;

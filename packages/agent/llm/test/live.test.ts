@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { expect, test } from "vitest";
-import { createToolbox } from "@lena/tool";
+import { DefaultToolbox } from "@lena/tool";
 import { createFoundryTokenProvider, createLLM, createModel } from "../index.js";
 import type { FoundryAuth, LLMEvent } from "../types.js";
 
@@ -10,7 +10,7 @@ import type { FoundryAuth, LLMEvent } from "../types.js";
 // Self-skips when unconfigured rather than failing.
 
 try {
-  process.loadEnvFile(fileURLToPath(new URL("../../../apps/gateway-agent/.env", import.meta.url)));
+  process.loadEnvFile(fileURLToPath(new URL("../../../../apps/gateway-agent/.env", import.meta.url)));
 } catch {
   // No .env file present; rely on the ambient environment.
 }
@@ -69,7 +69,7 @@ test.skipIf(!configured())("streams a reply from Foundry", { timeout: 120_000 },
 
 test.skipIf(!configured())("asks for a tool call and accepts the result", { timeout: 120_000 }, async () => {
   const llm = createLLM({ model: foundryModel(), getToken: createFoundryTokenProvider(servicePrincipal()) });
-  const tools = createToolbox([
+  const tools = new DefaultToolbox([
     {
       name: "get_weather",
       description: "Current weather for a city.",
@@ -118,7 +118,7 @@ test.skipIf(!configured())("asks for a tool call and accepts the result", { time
 
 test.skipIf(!configured())("fills in every tool parameter", { timeout: 120_000 }, async () => {
   const llm = createLLM({ model: foundryModel(), getToken: createFoundryTokenProvider(servicePrincipal()) });
-  const tools = createToolbox([
+  const tools = new DefaultToolbox([
     {
       name: "convert_currency",
       description: "Convert an amount from one currency to another.",
