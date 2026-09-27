@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { type Static, Type } from "typebox";
 import type { Tool } from "../../tool.js";
+
+const writeDescription = readFileSync(join(import.meta.dirname, "write.md"), "utf8").trim();
 
 const paramSchema = Type.Object({
   path: Type.String({
@@ -15,9 +18,7 @@ const paramSchema = Type.Object({
 /** Create or overwrite a UTF-8 text file, creating missing parent directories. */
 export class WriteTool implements Tool<typeof paramSchema> {
   readonly name = "write";
-  readonly description =
-    "Write a text file, replacing it entirely if it exists. Missing parent directories are created. " +
-    "Pass the complete content — this does not edit or append.";
+  readonly description = writeDescription;
   readonly parameters = paramSchema;
 
   /** `workDir` anchors relative paths; pass the same directory the bash tool runs in. */

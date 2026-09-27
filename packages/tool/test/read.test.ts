@@ -56,6 +56,13 @@ test("throws for a missing file, a directory and a binary file", async () => {
   await expect(tool.execute({ path: "bin.dat" })).rejects.toThrow('"bin.dat" is not UTF-8 text.');
 });
 
+test("the description fills every placeholder from read.md", () => {
+  const { description } = new ReadTool(tmpdir());
+
+  expect(description).toContain(`Returns up to ${MAX_LINES} lines or 100 KB per call`);
+  expect(description).not.toContain("{{");
+});
+
 async function toolWithFile(name: string, content: string | Buffer): Promise<ReadTool> {
   const dir = await mkdtemp(join(tmpdir(), "lena-read-"));
   tempDirs.push(dir);

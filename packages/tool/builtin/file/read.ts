@@ -1,7 +1,11 @@
+import { readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { renderPrompt } from "@lena/util/render-prompt";
 import { type Static, Type } from "typebox";
 import type { Tool } from "../../tool.js";
+
+const readDescriptionTemplate = readFileSync(join(import.meta.dirname, "read.md"), "utf8").trim();
 
 /** Most lines one call returns; the model pages on with `line_offset`. */
 export const MAX_LINES = 1000;
@@ -28,11 +32,11 @@ const paramSchema = Type.Object({
 /** Read a UTF-8 text file as numbered lines, capped by line count, line length and bytes. */
 export class ReadTool implements Tool<typeof paramSchema> {
   readonly name = "read";
-  readonly description =
-    `Read a text file. Each line comes back as \`<line number>\\t<content>\`. Returns at most ${MAX_LINES} ` +
-    `lines or ${MAX_BYTES / 1000} KB per call, and lines longer than ${MAX_LINE_LENGTH} characters are ` +
-    "cut; page through a large file with `line_offset` and `n_lines`. Directories and binary files are " +
-    "not supported — use `bash` for those.";
+  readonly description = renderPrompt(readDescriptionTemplate, {
+    MAX_LINES,
+    MAX_BYTES_KB: MAX_BYTES / 1000,
+    MAX_LINE_LENGTH,
+  });
   readonly parameters = paramSchema;
 
   /** `workDir` anchors relative paths; pass the same directory the bash tool runs in. */
