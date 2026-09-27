@@ -1,5 +1,5 @@
 import { type Static, Type } from "typebox";
-import type { Tool } from "./tool.js";
+import type { Tool } from "../tool.js";
 import { createMcpSession, extractText } from "./helper/azure-mcp.js";
 
 /** Milliseconds to allow a single generate call before giving up. */

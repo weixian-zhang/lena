@@ -10,7 +10,7 @@
             "type": "node",
             "request": "launch",
             "name": "Debug vitest (current file)",
-            "cwd": "${workspaceFolder}/apps/gateway-agent",
+            "cwd": "${workspaceFolder}",
             "program": "${workspaceFolder}/apps/gateway-agent/node_modules/vitest/vitest.mjs",
             "args": ["run", "${file}"],
             "autoAttachChildProcesses": true,
