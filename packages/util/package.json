@@ -11,6 +11,10 @@
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
+    "@types/nunjucks": "^3.2.6",
     "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "nunjucks": "^3.2.4"
   }
 }

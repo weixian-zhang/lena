@@ -156,10 +156,17 @@ importers:
         version: 4.1.10(@types/node@24.13.3)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.0))
 
   packages/util:
+    dependencies:
+      nunjucks:
+        specifier: ^3.2.4
+        version: 3.2.4
     devDependencies:
       '@types/node':
         specifier: ^24.3.0
         version: 24.13.3
+      '@types/nunjucks':
+        specifier: ^3.2.6
+        version: 3.2.6
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
@@ -759,6 +766,9 @@ packages:
   '@types/node@24.13.3':
     resolution: {integrity: sha1-SfGL08ZHhm3NpRoHVsFF4UWQzhY=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/@types/node/-/node-24.13.3.tgz}
 
+  '@types/nunjucks@3.2.6':
+    resolution: {integrity: sha1-bW4DY3GVRd+LmgJCeZAu32iyyqk=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/@types/nunjucks/-/nunjucks-3.2.6.tgz}
+
   '@types/pg@8.20.0':
     resolution: {integrity: sha1-i9A9OsaxkUOo3n1mqdE9oyzZFSY=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/@types/pg/-/pg-8.20.0.tgz}
 
@@ -798,6 +808,9 @@ packages:
   '@vitest/utils@4.1.10':
     resolution: {integrity: sha1-/8cQVfGL/Msf0FhjZevCgkiS5AM=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/@vitest/utils/-/utils-4.1.10.tgz}
 
+  a-sync-waterfall@1.0.1:
+    resolution: {integrity: sha1-dba2qnJZi0l6El56J3DxT0yKH6c=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/a-sync-waterfall/-/a-sync-waterfall-1.0.1.tgz}
+
   accepts@2.0.0:
     resolution: {integrity: sha1-u89LpQdUZ/PyEx6rPP/HPC9deJU=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/accepts/-/accepts-2.0.0.tgz}
     engines: {node: '>= 0.6'}
@@ -816,6 +829,9 @@ packages:
 
   ajv@8.20.0:
     resolution: {integrity: sha1-MEs2Nq3Yi6fZNnYN1Q7OAG3qlfk=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/ajv/-/ajv-8.20.0.tgz}
+
+  asap@2.0.6:
+    resolution: {integrity: sha1-5QNHYR1+aQlDIIu9r+vLwvuGbUY=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/asap/-/asap-2.0.6.tgz}
 
   assertion-error@2.0.1:
     resolution: {integrity: sha1-9kGhlrM1aQsQcL8AtudZP+wZC/c=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/assertion-error/-/assertion-error-2.0.1.tgz}
@@ -884,6 +900,10 @@ packages:
 
   chownr@1.1.4:
     resolution: {integrity: sha1-b8nXtC0ypYNZYzdmbn0ICE2izGs=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/chownr/-/chownr-1.1.4.tgz}
+
+  commander@5.1.0:
+    resolution: {integrity: sha1-Rqu9FlL44Fm92u+Zu9yyrZzxea4=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/commander/-/commander-5.1.0.tgz}
+    engines: {node: '>= 6'}
 
   content-disposition@1.1.0:
     resolution: {integrity: sha1-89t4nHUtRVZMx+nh4LMXkNSjjhc=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/content-disposition/-/content-disposition-1.1.0.tgz}
@@ -1403,6 +1423,16 @@ packages:
   node-fetch@3.3.2:
     resolution: {integrity: sha1-0eiJus33M7T/OyskPrehKGagt4s=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/node-fetch/-/node-fetch-3.3.2.tgz}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
+
+  nunjucks@3.2.4:
+    resolution: {integrity: sha1-8IeO71KM57CqNdZ8xomGNf10ZJ4=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/nunjucks/-/nunjucks-3.2.4.tgz}
+    engines: {node: '>= 6.9.0'}
+    hasBin: true
+    peerDependencies:
+      chokidar: ^3.3.0
+    peerDependenciesMeta:
+      chokidar:
+        optional: true
 
   object-assign@4.1.1:
     resolution: {integrity: sha1-IQmtx5ZYh8/AXLvUQsrIv7s2CGM=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/object-assign/-/object-assign-4.1.1.tgz}
@@ -2600,6 +2630,8 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
+  '@types/nunjucks@3.2.6': {}
+
   '@types/pg@8.20.0':
     dependencies:
       '@types/node': 24.13.3
@@ -2657,6 +2689,8 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
 
+  a-sync-waterfall@1.0.1: {}
+
   accepts@2.0.0:
     dependencies:
       mime-types: 3.0.2
@@ -2674,6 +2708,8 @@ snapshots:
       fast-uri: 3.1.3
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
+
+  asap@2.0.6: {}
 
   assertion-error@2.0.1: {}
 
@@ -2746,6 +2782,8 @@ snapshots:
   chalk@5.6.2: {}
 
   chownr@1.1.4: {}
+
+  commander@5.1.0: {}
 
   content-disposition@1.1.0: {}
 
@@ -3241,6 +3279,12 @@ snapshots:
       data-uri-to-buffer: 4.0.1
       fetch-blob: 3.2.0
       formdata-polyfill: 4.0.10
+
+  nunjucks@3.2.4:
+    dependencies:
+      a-sync-waterfall: 1.0.1
+      asap: 2.0.6
+      commander: 5.1.0
 
   object-assign@4.1.1: {}
 

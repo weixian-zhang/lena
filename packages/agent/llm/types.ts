@@ -1,4 +1,4 @@
-import type { Toolbox } from "@lena/tool";
+import type { Toolbox, ToolContent } from "@lena/tool";
 
 /**
  * Lena's own LLM surface. Callers depend on these types, never on pi-ai's —
@@ -39,7 +39,7 @@ export type LLMMessage =
       role: "toolResult";
       toolCallId: string;
       toolName: string;
-      content: string;
+      content: string | ToolContent[];
       isError: boolean;
     };
 

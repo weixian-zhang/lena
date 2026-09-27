@@ -1,7 +1,7 @@
 import { type Static, Type } from "typebox";
 import { getAzureSession, MAX_OUTPUT_BYTES, runShell } from "./helper/cloud-shell.js";
 import { DELETION_PATTERN } from "@lena/agent/tools/bash";
-import type { Tool } from "./tool.js";
+import type { Tool } from "../tool.js";
 
 const paramSchema = Type.Object({
   command: Type.String({

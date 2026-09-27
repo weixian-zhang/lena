@@ -84,7 +84,7 @@ function toPiMessage(message: LLMMessage, model: Model<Api>): Message {
         role: "toolResult",
         toolCallId: message.toolCallId,
         toolName: message.toolName,
-        content: [{ type: "text", text: message.content }],
+        content: typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content,
         isError: message.isError,
         timestamp,
       };
