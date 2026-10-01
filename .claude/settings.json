@@ -12,8 +12,8 @@
         "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1"
     },
     "statusLine": {
-    "type": "command",
-    "command": "./.claude/statusline.sh",
-    "padding": 0
-  }
+        "type": "command",
+        "command": "./.claude/statusline.sh",
+        "padding": 0
+    }
 }
