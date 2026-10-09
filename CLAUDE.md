@@ -13,9 +13,10 @@ monitoring), resource search, data analysis, ETL, deploy, Sentinel threat huntin
 
 - Node.js latest + TypeScript, ESM. Modern built-ins: native fetch, `node:` imports.
   Runtime code → `apps/gateway-agent` (the app) and `packages/*` (its workspace packages).
-- Agent loop = pi-agent-core's `Agent` (`packages/agent/agent.ts`), used as an npm
-  dependency — never hand-rolled, vendored or forked. It drives the native tool_use cycle with
-  `toolExecution: "sequential"`.
+- Agent loop = Lena's own `turn()`/`step()` loop, with steering and stop — design in
+  `docs/plan/agent-loop.md`. Not pi-agent-core's `Agent`; `packages/agent/agent.ts` wraps it only
+  until the own loop replaces it. pi-ai is transport only, via `packages/agent/llm`. Tools run
+  sequentially.
 - Backend only, no UI. Keep the streamed event contract clean so a frontend can attach later.
 - Hosted on Azure. Config, secrets and provider selection are injected via env/config, never
   baked in.

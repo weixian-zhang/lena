@@ -4,7 +4,8 @@ import { getAzureSession, MAX_OUTPUT_BYTES, runShell } from "../cloud-shell.js";
 
 const schema = Type.Object({
   command: Type.String({
-    description: "The bash command to run. Use `-o json` for `az` output you need to parse.",
+    description:
+      "The bash command to run. Use `-o json` for `az` output you need to parse.",
   }),
   timeout: Type.Optional(
     Type.Number({ description: "Timeout in seconds. Omit for no timeout." }),
@@ -71,7 +72,12 @@ export const bashTool: AgentTool<typeof schema> = {
     }
 
     const { env, cwd } = await getAzureSession();
-    const { stdout, exitCode, truncated } = await runShell(command, { cwd, env, signal, timeout });
+    const { stdout, exitCode, truncated } = await runShell(command, {
+      cwd,
+      env,
+      signal,
+      timeout,
+    });
 
     const suffix = truncated
       ? `\n\n[output truncated at ${MAX_OUTPUT_BYTES / 1000} KB — narrow the query with --query, -o tsv, or a filter]`

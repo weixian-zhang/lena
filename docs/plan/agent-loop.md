@@ -1,200 +1,253 @@
-# `agent-core` — Lena's own agent loop
+# Agent loop — Lena's own `turn()` / `step()`
 
 ## Goal
 
-A self-contained module holding Lena's agent loop: a `while` loop split into `turn()` and
-`step()`, plus a basic `Tool` type. It owns its control flow, its termination rules and its
-event contract.
+Lena owns its agent loop: a `while` loop split into `turn()` (one user-facing turn) and
+`step()` (one model call plus its tools), with steering, stop, and replies on the platform the
+user wrote from. One loop runs per session.
 
-The `turn()` / `step()` naming is taken from deepseek-harness
-(`packages/core/agent-loop/src/agent.ts:269,352`) — `turn()` is the user-facing unit, `step()`
-is one model call. The discipline of delegating all provider work to a single injected
-stream function is from pi (`packages/agent/src/agent-loop.ts:155`).
+- Model calls go through `LLM.stream()` (`packages/agent/llm`); pi-ai is transport only.
+- Tools are `Tool` / `Toolbox` from `@lena/tool`.
+- Not pi-agent-core's `Agent`. `packages/agent/agent.ts` wraps it only until this loop replaces it.
 
-This module depends on nothing else in the repo. It is exercised by its own test with a fake
-model, and can be wired into the app separately.
-
-## Dependency boundary
-
-| Ours | `@mariozechner/pi-ai` |
-|---|---|
-| The loop: `turn()`, `step()`, tool dispatch | HTTP, SSE parsing, provider quirks |
-| `Tool`, `ToolResult`, `LoopEvent`, `LoopOptions` | `Message`, `Model`, `AssistantMessage` |
-| Termination rules, step cap | `streamSimple()`, `AssistantMessageEvent` deltas |
-| Turning a thrown tool error into a result | Assembling deltas into a final message |
-
-We write the agent loop. We do not write a wire protocol. `pi-ai` is used as a library and
-never vendored or forked; the loop touches it only through the `StreamFunction` type, so
-swapping it for a raw SDK later means replacing one injected function.
-
-## Module layout
+## Layout
 
 ```
-apps/gateway-agent/src/agent-core/
-  types.ts    contracts — no imports from the rest of the repo
-  loop.ts     turn(), step(), runToolCall()
+packages/agent/loop/
+  types.ts           LoopOptions, LoopEvent, TurnEndReason
+  turn.ts            turn(), step(), runToolCall()
+  session-runner.ts  SessionRunner — inbox, reply address, stop, next-turn start
+  agent-factory.ts   AgentFactory — creates and finds runners by session key
 ```
 
-## Contracts — `types.ts`
+## Contracts
 
 ```ts
-import type {
-  AssistantMessageEvent,
-  ImageContent,
-  Message,
-  Model,
-  StreamFunction,
-  TextContent,
-} from "@mariozechner/pi-ai";
-import type { Static, TSchema } from "typebox";
-
-/** What a tool hands back to the model. */
-export type ToolResult = {
-  content: (TextContent | ImageContent)[];
-};
-
-/** A tool the model can call. Throw on failure — the loop turns it into an error result. */
-export type Tool<TParams extends TSchema = TSchema> = {
-  name: string;
-  description: string;
-  parameters: TParams;
-  execute(args: Static<TParams>): Promise<ToolResult>;
-};
-
-export type TurnEndReason = "stop" | "max_steps" | "error";
-
-export type LoopEvent =
-  | { type: "step_start"; step: number }
-  | { type: "message_update"; event: AssistantMessageEvent }  // pi-ai's delta union, forwarded as-is
-  | { type: "tool_start"; name: string; args: unknown }
-  | { type: "tool_end"; name: string; result: ToolResult; isError: boolean }
-  | { type: "turn_end"; reason: TurnEndReason };
-
-export type LoopOptions = {
-  model: Model<any>;
+type LoopOptions = {
+  llm: LLM;
   systemPrompt: string;
-  tools: Tool[];
-  /** Injected so tests drive the loop without a live endpoint. Defaults to pi-ai's `streamSimple`. */
-  stream?: StreamFunction;
-  /** Resolved per model call, so short-lived bearer tokens stay fresh across long tool runs. */
-  getApiKey?: () => Promise<string | undefined>;
+  tools: Toolbox;
   /** Hard cap on model calls in one turn. Default 50. */
   maxSteps?: number;
+  /** Aborts the model stream and the running tool. */
+  signal?: AbortSignal;
+  /** Messages the user sent since the last step; called at the top of every step and before stopping. */
+  takeSteers?: () => LLMMessage[];
 };
+
+type TurnEndReason = "stop" | "max_steps" | "error" | "cancelled";
+
+type LoopEvent =
+  | { type: "step_start"; step: number }
+  | { type: "llm"; event: LLMEvent }
+  | { type: "steer_applied"; messages: LLMMessage[] }
+  | { type: "tool_start"; name: string; args: unknown }
+  | { type: "tool_end"; name: string; isError: boolean }
+  | { type: "turn_end"; reason: TurnEndReason };
 ```
 
-The tool type has four fields. Everything a fuller framework adds — labels, per-tool
-execution modes, partial-result callbacks, argument shims, early-termination hints, abort
-signals — is left out until something needs it.
+`turn(options, history)` is an `AsyncGenerator<LoopEvent, LLMMessage[]>`: `for await` gives the
+caller backpressure and maps onto SSE. It never sees the inbox — only `takeSteers`.
 
-## Control flow — `loop.ts`
+## Turn loop
 
-Exported surface on top, helpers below.
+```
+while true
+  if signal.aborted                      → end "cancelled"
+  if ++step > maxSteps                   → end "max_steps"
+  steers = takeSteers()
+  if steers → append to history; emit steer_applied
+  response = llm.stream(history, tools, signal)
+  if error                               → end "error"   (tools not run)
+  if aborted                             → end "cancelled"
+  if response has tool calls
+    run each in order via runToolCall()   (sequential: Azure ordering is observable)
+    if aborted → close remaining calls   → end "cancelled"
+    continue
+  if takeSteers() would return messages  → continue   (steer arrived during the final answer)
+  end "stop"
+```
 
-### `turn()` — the while loop
+`runToolCall()` turns an unknown tool, invalid args, or a thrown `execute()` into an error tool
+result, so no exception escapes and the model can react.
+
+On `"cancelled"`, every `tool_use` without a `tool_result` gets an error result — "Cancelled by
+the user. Do not retry automatically." — so the next turn's history is valid.
+
+## Session key
+
+```
+agent:<agentId>:<channel>:<chatType>:<chatId>[:thread:<threadId>]    agentId = main
+agent:cron:<jobId>
+agent:subagent:<parentSessionId>:<ulid>
+```
+
+- `agentId` names the kind of agent: `main` handles chats, `cron` runs a scheduled job,
+  `subagent` is spun off by another agent. The gateway's current `InboundMessage`
+  (`packages/gateway/types.ts`) already carries `agentId`.
+- One gateway function, `buildSessionKey(...)`, builds it, so the same chat always yields the
+  same key and `AgentFactory` finds the running agent.
+- Each segment is URI-encoded and case is kept: Teams ids contain `:`, and lowercasing broke
+  case-sensitive ids in OpenClaw.
+- The key is identity, not the reply address. The ULID is the **session id** in the session
+  store; `/new` ends the session and starts a new ULID under the same key.
+
+## Reply address and commands
+
+The agent replies to the reply address of the user's latest command — never one from the model,
+and never parsed out of the key (OpenClaw's lesson: the key is identity, the address is stored).
 
 ```ts
-export async function* turn(
-  options: LoopOptions,
-  messages: Message[],
-): AsyncGenerator<LoopEvent, Message[]>
-```
+/** Where a reply goes: channel, chat and thread. Set by the channel adapter, never by the model. */
+type ReplyAddress = { channel: string; chatType: ChatType; chatId: string; threadId?: string; userId?: string };
 
-Owns the step counter and the turn's outcome. `messages` is the conversation so far; the
-loop appends to it and returns it.
+/**
+ * What the gateway hands an agent: what the user did, not what it means — the agent decides that
+ * from its state. History is not carried; the agent loads it by session key.
+ */
+type AgentCommand =
+  | { kind: "prompt"; prompt: string; replyAddress: ReplyAddress }
+  | { kind: "answer"; questionId: string; answers: QuestionAnswer[]; replyAddress: ReplyAddress }
+  | { kind: "stop" };
 
-```
-let step = 0;
-while (true) {
-  step++;
-  if (step > maxSteps) { yield turn_end("max_steps"); return messages; }
-  yield step_start(step);
-  const reason = yield* runStep(options, messages);   // forwards every event it yields
-  if (reason) { yield turn_end(reason); return messages; }
+/** Channel adapters behind one interface; each keeps its platform references (Teams serviceUrl, tenantId). */
+interface Outbound {
+  send(address: ReplyAddress, text: string): Promise<void>;
 }
 ```
 
-An `AsyncGenerator` rather than a callback or an event emitter: `for await` gives the caller
-backpressure for free, and maps directly onto SSE when a transport is added.
+- A command's `replyAddress` becomes the agent's **reply address**, so a new thread or chat
+  detail is picked up by the next reply. Tools that ask the user send to it too.
+- The agent sends each turn's final answer with `outbound.send(replyAddress, text)`.
+- A cron job's address comes from its job definition. A subagent has none — it answers its
+  parent through its tool result.
+- **Steer is a meaning, not a kind.** The same `prompt` starts a turn or steers, depending on the
+  agent's state. A separate `steer` kind would only be needed if the user chose "steer now" vs
+  "run next" (Kimi's Ctrl+S); the sender can't know the agent's state, and both mismatches resolve
+  to `prompt`'s behaviour.
 
-### `step()` — one model call plus its tools
+**Where the types live**
 
-Returns a `TurnEndReason` to end the turn, or `null` to go round again.
+- `ReplyAddress`, `ChatType` and `Outbound` in `packages/gateway/types.ts`; `AgentCommand` in
+  `packages/agent/loop/types.ts`, importing them.
+- `@lena/gateway` stays types-only, a leaf every package can import. The gateway server and
+  channel adapters call `AgentFactory`, so they live outside it (e.g. `apps/gateway-agent`), or
+  `gateway` → `agent` → `gateway` forms a cycle.
+- The existing `InboundMessage` there overlaps `ReplyAddress` (channel, chatType, chatId, userId);
+  build it from `ReplyAddress` instead of repeating the fields.
 
-1. `stream(model, { systemPrompt, messages, tools }, { apiKey })`
-2. forward each event as `message_update`; keep the final `AssistantMessage`
-3. push that message onto `messages`
-4. branch on `stopReason` and content — see the table below
-5. if there are tool calls, run them in order, pushing each `ToolResultMessage` onto
-   `messages`, then return `null`
+**Questions the agent asks** — modelled on Claude Code's `AskUserQuestion`. One shape covers
+every answer format, so there is no per-format type:
 
-Tools run **sequentially**. Lena's tools act on live Azure subscriptions, where ordering is
-observable; it is also less code than a batch scheduler.
+```ts
+/** One of 1–4 questions in a set; each is a category with its own choices. */
+type Question = {
+  header: string;                                        // short category label, e.g. "Region"
+  question: string;
+  options: { label: string; description?: string }[];    // 2–4
+  multiSelect: boolean;
+};
 
-### Termination rules
+/** One answer per question: the chosen labels, and/or free text ("Other"). */
+type QuestionAnswer = { header: string; selected: string[]; otherText?: string };
+```
 
-| Condition | Result |
+| Answer format | Expressed as |
 |---|---|
-| `stopReason` is `"error"` or `"aborted"` | `turn_end: "error"` — tools are **not** run |
-| Assistant message has no `toolCall` blocks | `turn_end: "stop"` |
-| Step counter exceeds `maxSteps` | `turn_end: "max_steps"` |
-| Assistant message has tool calls | run them, then another step |
+| free text | a typed reply (`prompt`), or `otherText` |
+| one multiple choice | one question, `multiSelect: false` |
+| several categories, each a multiple choice | several questions, one per category |
 
-The step cap has no equivalent in either reference loop — both run until the model stops.
-Lena acts on real subscriptions, so an unbounded loop is a cost and blast-radius risk.
+Platforms without buttons (plain Slack or Telegram text) render the options as a numbered list;
+the typed reply arrives as a `prompt`.
 
-### `runToolCall()` — the one place a throw becomes data
+## Sessions, steering and stop
 
+`AgentFactory` creates agents and finds existing ones by session key — one class, because every
+command needs "find or create" and two places would have to agree on it.
+
+```ts
+interface SessionRunner {
+  /**
+   * prompt — idle: start a turn; running: steer; question waiting: free-text answer.
+   * answer — resolves the waiting question with a matching id. stop — abort, empty the inbox.
+   */
+  submit(command: AgentCommand): void;
+}
+
+/** The session runners in this process, one per session key. */
+interface AgentFactory {
+  /** The runner for `sessionKey`, created on first use. */
+  getOrCreate(sessionKey: string): SessionRunner;
+}
 ```
-unknown tool name              → error ToolResultMessage
-args fail schema validation    → error ToolResultMessage
-tool.execute() throws          → error ToolResultMessage, isError: true
-```
 
-No exception escapes the loop. That is what lets a tool body use a plain `throw` for failure
-instead of encoding errors into its return content — the model sees the message as a normal
-tool result and can react to it.
+- The factory only finds or creates. It never enqueues: whether a command starts a turn, becomes
+  a steer or aborts depends on the agent's state, so each agent owns its inbox.
+- The constructor takes what every agent shares (`LLM`, shared tools, system prompt,
+  `Outbound`), so `getOrCreate` needs only the key.
+- The gateway routes every kind the same way: `factory.getOrCreate(key).submit(command)`. A stop
+  for an unknown key creates an idle runner, which does nothing.
+- It knows only this process's runners; finding a key's owner across instances is routing.
 
-`stopReason: "length"` needs no special case here. A truncated response can cut a tool call's
-JSON arguments mid-string, but those arguments then fail validation and become an ordinary
-error result, so the model is told what went wrong.
+An `AgentCommand` carries an explicit kind set by the channel or UI, never guessed from the text.
+The runner handles each one on arrival:
+
+| Arrives | Idle | Turn running | Question waiting |
+|---|---|---|---|
+| `prompt` | start a turn | steer — push onto the inbox | free-text answer |
+| `answer` | rejected — no question | rejected — no question | answers it if `questionId` matches; a stale id is rejected |
+| `stop` | no-op, reported | empty the inbox, `abort()` | `abort()` — the question is cancelled |
+
+- **One queue: the inbox.** Stop never enters it — the inbox is read only at step boundaries, so
+  a queued stop would wait behind a long tool.
+- **Typed text answers a waiting question.** Plain chat replies can't carry a `questionId`, and the
+  loop is blocked in the tool, so a steer would have nowhere to land. Buttons and forms send
+  `answer` with the id, which guards against answering a stale question.
+- **No step-level queue.** Without retries or hooks, "tools were called, go again" is the `while`
+  condition. Kimi Code's prompt queue and step request queue are not adopted.
+- **Where a steer lands:** after the current step's tool results, before the next model call.
+  A steer during the final answer runs one more step. Remaining tool calls are not skipped.
+- **No lost prompts.** When a turn ends, the inbox check and the switch to idle run in one
+  synchronous block. Leftover prompts start the next turn — except after a stop.
+- **Stop latency.** The model stream aborts at once; `bash` kills its process tree. A tool that
+  ignores the signal delays the stop until it returns.
+- **One owner per session key.** The inbox is in memory, so a session key must be owned by one
+  process, and every command must route to it.
 
 ## Verification
 
-1. `npm run typecheck` — passes under `strict`, `noUncheckedIndexedAccess`,
-   `verbatimModuleSyntax`.
-2. `test/agent-core.test.ts` — a fake stream function returning scripted
-   `AssistantMessageEventStream`s. It fakes only the process boundary (the model provider);
-   the loop and the test tools run for real. Cases:
+A test with a fake `LLM` (the process boundary); the loop and tools run for real.
 
-   | Case | Expected |
-   |---|---|
-   | text-only response | one step, reason `"stop"` |
-   | one tool call | tool ran, result appended, second model call made |
-   | two tool calls in one message | executed in model order |
-   | tool throws | `isError: true` result reaches the model, loop continues |
-   | unknown tool name | error result, not a crash |
-   | `stopReason: "error"` | reason `"error"`, tools not run |
-   | model always calls a tool | stops at `maxSteps`, reason `"max_steps"` |
-   | multi-step run | `getApiKey` awaited on every step, not just the first |
-
-3. `npm run test` — existing suites stay green; this adds a module and changes nothing else.
-
-`vitest.config.ts` globs `test/**/*.test.ts`, so the test lives in `test/`.
-
-## Prerequisite
-
-`typebox` must be added to `package.json` as a direct dependency. It is currently only
-resolved transitively.
+| Case | Expected |
+|---|---|
+| text-only response | one step, `"stop"` |
+| tool call | tool runs, result appended, second model call |
+| two tool calls | run in model order |
+| tool throws / unknown tool | error result reaches the model, loop continues |
+| model error | `"error"`, tools not run |
+| model always calls a tool | `"max_steps"` |
+| steer during a tool | applied before the next model call |
+| steer during the final answer | one more step |
+| steer in the same tick the turn ends | starts a new turn, not lost |
+| stop during a tool | `"cancelled"`, dangling calls closed, inbox emptied |
+| stop while idle | no-op |
+| prompt with a new `threadId` | the next reply goes to the new address |
+| same chat, two prompts | same key, same agent |
 
 ## Out of scope
 
-Recorded so the gaps are known, each to be added when something needs it:
+Each added when something needs it:
 
-- **Session persistence** — the seam is `turn()`'s `messages` parameter and return value.
-- **Compaction** — the seam is a pre-call transform on `messages` inside `step()`.
-- **Cancellation** — an `AbortSignal` threaded through `turn`, `step` and `execute`.
-- **Early termination** — a tool result that ends the turn (for ask-the-user style tools).
-- **Context hooks** — pre-call and post-tool callbacks on `LoopOptions`.
-- **Parallel tool execution**, per-tool execution modes, streaming partial tool results.
-- **Steering** — injecting a message mid-turn.
+- Session persistence and compaction — the agent loads history by session key; commands never
+  carry it.
+- Removing idle runners from `AgentFactory` — a runner holds its history in memory, so removal
+  waits for persistence.
+- Early termination — a tool result that ends the turn.
+- Parallel tool execution; streaming partial tool results.
+- A grace timer for tools that ignore the abort signal.
+- Cross-process routing of a session key (sticky routing or Azure Service Bus sessions).
+- `ask_user`, the `answer` command and per-platform button rendering — built together later.
+  The command type above is final, so it doesn't change shape then.
+- Structured approvals for risky Azure changes (`outbound-message-type-design.md`).
+- Streaming partial output to the desktop app.
