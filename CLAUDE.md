@@ -41,8 +41,7 @@ In test files, the `test(...)` cases come first and their helper functions below
 
 ## TypeScript conventions
 
-- Define a class's contract as an `interface` and have the class `implements` it.
-- Use `type` only for complex types, unions and aliases.
-- Prefer classes over loose functions: when methods share state or belong to one concept, group
-  them in a class. Use plain functions only for logic that is truly stateless and would not
-  gain cohesion from a class.
+- Code that holds state or groups more than one related function is a class, not an exported
+  object or a `type` of functions. Its contract is an `interface` the class `implements`.
+- Pure data shapes with no behaviour are a `type`.
+- Plain functions only for single, stateless operations.
