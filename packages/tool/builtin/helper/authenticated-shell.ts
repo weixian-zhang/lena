@@ -2,45 +2,25 @@ import { spawn } from "node:child_process";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Static, Type } from "typebox";
-import type { Tool } from "../tool.js";
 
-/** Byte cap on output returned to the model; Azure listings can be enormous. */
-const MAX_OUTPUT_BYTES = 100_000;
-
-/** Commands that delete files or Azure resources. Deletion is out of scope by design. */
-const DELETION_PATTERN =
-  /\b(rm\s+-[a-z]*[rf]|rmdir|az\b[^|;&]*\bdelete\b|--method[= ]+delete|-X[= ]*delete|\bpurge\b)/i;
+/** Byte cap on a command's output; Azure listings can be enormous. */
+export const MAX_OUTPUT_BYTES = 100_000;
 
 /** Who `az` logs in as. */
 export type AzureLogin =
-  | { kind: "servicePrincipal"; tenantId: string; clientId: string; clientSecret: string }
+  | {
+      kind: "servicePrincipal";
+      tenantId: string;
+      clientId: string;
+      clientSecret: string;
+    }
   | { kind: "managedIdentity" } // system-assigned
   | { kind: "userAssignedManagedIdentity"; clientId: string };
 
-const paramSchema = Type.Object({
-  command: Type.String({
-    description:
-      "The bash command to run. Use `-o json` for `az` output you need to parse.",
-  }),
-  timeout: Type.Optional(
-    Type.Number({ description: "Timeout in seconds. Omit for no timeout." }),
-  ),
-});
-
-/** Run a bash command in `workDir` with the Azure CLI pre-authenticated as `azureLogin`. */
-export class CloudShellTool implements Tool<typeof paramSchema> {
-  readonly name = "bash";
-  readonly description =
-    "Run a bash command. Use this for Azure CLI (`az` is pre-authenticated against the target " +
-    "subscription) and for any other shell tool (jq, grep, curl, git, node). " +
-    "To run JavaScript, write a `.mjs` file with a quoted heredoc (`cat > x.mjs <<'EOF'`) and " +
-    "run `node x.mjs` — that keeps the shell from touching the source, and gives real line " +
-    "numbers in stack traces. Deleting Azure resources is out of scope and blocked.";
-  readonly parameters = paramSchema;
-
+/** Runs bash commands in a working directory, with `az` logged in. */
+export class AuthenticatedShell {
   /** Logged-in env, cached so `az login` runs once and every later `az` call reuses its token. */
-  private azureEnv: Promise<NodeJS.ProcessEnv> | undefined;
+  private loggedInEnv: Promise<NodeJS.ProcessEnv> | undefined;
 
   /** `workDir` is where every command runs; the caller creates it. */
   constructor(
@@ -48,39 +28,28 @@ export class CloudShellTool implements Tool<typeof paramSchema> {
     private readonly azureLogin: AzureLogin,
   ) {}
 
-  async execute(
-    { command, timeout }: Static<typeof paramSchema>,
+  /** Logs in on first call; rejects on abort, timeout or failed login. A non-zero exit resolves. */
+  async run(
+    command: string,
     abortSignal?: AbortSignal,
-  ): Promise<string> {
-    if (DELETION_PATTERN.test(command)) {
-      throw new Error(
-        "Deletion is out of scope by design and is blocked. If the user needs a resource " +
-          "deleted, explain how they can do it themselves or escalate — do not attempt it.",
-      );
-    }
-
-    const env = await (this.azureEnv ??= this.loginToAzure());
-    const { stdout, exitCode, truncated } = await runShell(command, {
+    timeoutSeconds?: number,
+  ): Promise<{ output: string; exitCode: number | null; truncated: boolean }> {
+    const processEnv = await (this.loggedInEnv ??= this.login());
+    return runShell(command, {
       cwd: this.workDir,
-      processEnv: env,
+      processEnv,
       abortSignal,
-      timeout,
+      timeout: timeoutSeconds,
     });
-
-    const suffix = truncated
-      ? `\n\n[output truncated at ${MAX_OUTPUT_BYTES / 1000} KB — narrow the query with --query, -o tsv, or a filter]`
-      : "";
-    const text = (stdout || "(no output)") + suffix;
-
-    // `null` means killed by signal — handled as abort/timeout, not a failed command.
-    if (exitCode !== 0 && exitCode !== null) throw new Error(text);
-    return text;
   }
 
-  /** Logs in under a private `AZURE_CONFIG_DIR`, so concurrent tools don't share `~/.azure`. */
-  private async loginToAzure(): Promise<NodeJS.ProcessEnv> {
+  /** Logs in under a private `AZURE_CONFIG_DIR`, so concurrent shells don't share `~/.azure`. */
+  private async login(): Promise<NodeJS.ProcessEnv> {
     const configDir = await mkdtemp(join(tmpdir(), "lena-az-config-"));
-    const env: NodeJS.ProcessEnv = { ...process.env, AZURE_CONFIG_DIR: configDir };
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      AZURE_CONFIG_DIR: configDir,
+    };
 
     // The secret goes through an env var so it never appears in the command string.
     const loginEnv =
@@ -93,7 +62,9 @@ export class CloudShellTool implements Tool<typeof paramSchema> {
       timeout: LOGIN_TIMEOUT_SECONDS,
     });
     if (result.exitCode !== 0) {
-      throw new Error(`az login (${this.azureLogin.kind}) failed:\n${result.stdout || "(no output)"}`);
+      throw new Error(
+        `az login (${this.azureLogin.kind}) failed:\n${result.output || "(no output)"}`,
+      );
     }
     return env;
   }
@@ -115,7 +86,7 @@ type RunShellOptions = {
 
 type RunShellResult = {
   /** Merged stdout + stderr in arrival order, capped at {@link MAX_OUTPUT_BYTES}. */
-  stdout: string;
+  output: string;
   /** `null` when the process was terminated by a signal. */
   exitCode: number | null;
   truncated: boolean;
@@ -132,7 +103,9 @@ function azLoginCommand(login: AzureLogin): string {
     case "userAssignedManagedIdentity":
       return `az login --identity --client-id '${login.clientId}' ${quiet}`;
     default:
-      throw new Error(`Unknown Azure login kind: ${JSON.stringify((login as { kind: unknown }).kind)}`);
+      throw new Error(
+        `Unknown Azure login kind: ${JSON.stringify((login as { kind: unknown }).kind)}`,
+      );
   }
 }
 
@@ -217,12 +190,10 @@ function runShell(
         return reject(new Error(`Command timed out after ${timeout} seconds`));
       // Decode once at the end so multi-byte UTF-8 is never split across chunks.
       resolve({
-        stdout: Buffer.concat(chunks).toString("utf8"),
+        output: Buffer.concat(chunks).toString("utf8"),
         exitCode: code,
         truncated,
       });
     });
   });
 }
-
-
