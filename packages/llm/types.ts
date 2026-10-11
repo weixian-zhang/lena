@@ -1,24 +1,17 @@
-import type { Toolbox, ToolContent } from "@lena/tool";
+import type { Tool, ToolContent } from "@lena/tool/tool";
 
 /**
  * Lena's own LLM surface. Callers depend on these types, never on pi-ai's —
  * `stream-adapter.ts` is where the two meet.
  */
 
-/**
- * How to authenticate against Foundry. The caller picks one — typically from a
- * UI — because each option carries its own credentials.
- */
-export type FoundryAuth =
-  /** A Foundry API key. Simplest, but a secret to store and rotate. */
-  | { kind: "apiKey"; key: string }
-  /** An Entra service principal. The usual choice for local development. */
-  | { kind: "servicePrincipal"; tenantId: string; clientId: string; clientSecret: string }
-  /** The hosting service's system-assigned managed identity. No secret to store. */
-  | { kind: "systemAssignedManagedIdentity" }
-  /** A user's token from an `az login --use-device-code` sign-in done elsewhere.
-   *  Must already be scoped to Foundry — a token for ARM looks identical here. */
-  | { kind: "deviceCodeUserToken"; token: string };
+/** Wire protocols a configured model can speak; pi-ai routes each to its own SDK. */
+export const LLM_APIS = [
+  "openai-responses",
+  "openai-completions",
+  "anthropic-messages",
+] as const;
+export type LLMApi = (typeof LLM_APIS)[number];
 
 /** A tool invocation the model asked for. */
 export type LLMToolCall = {
@@ -43,11 +36,11 @@ export type LLMMessage =
       isError: boolean;
     };
 
-/** One model call. */
+/** One model call, on the model the `LLM` was built for. */
 export type LLMRequest = {
   systemPrompt?: string;
   messages: LLMMessage[];
-  tools?: Toolbox;
+  tools?: readonly Tool[];
   signal?: AbortSignal;
   temperature?: number;
   maxTokens?: number;
