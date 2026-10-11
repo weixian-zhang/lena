@@ -11,10 +11,12 @@ Lena needs an LLM module modelled on DeepSeek Harness's `packages/llm/llm-pi-ai`
 - **Model picker:** a future desktop frontend lets users pick a model, so providers and models live in Lena's database (SQLite locally, Postgres in the cloud) and the package lists them.
 - **New providers** must be additive later.
 
-**Where it lives:** a new top-level package `packages/llm` (`@lena/llm`, the directory already exists and is empty). The current `packages/agent/llm` (pi-ai 0.85.1) is **moved and evolved**, not rewritten:
+**The old agent is archived.** `packages/agent` now lives at `packages/archive/agent`, outside the pnpm workspace, so `@lena/agent` no longer resolves. Nothing new depends on it. After this LLM module, the agent loop is built from scratch on `@lena/llm` (`docs/plan/agent-loop.md`).
+
+**Where it lives:** a new top-level package `packages/llm` (`@lena/llm`, the directory already exists and is empty). The archived `packages/archive/agent/llm` (pi-ai 0.85.1) is **moved and evolved**, not rewritten:
 - `stream-adapter.ts` (pi-ai ⇄ Lena events and messages) and `types.ts` already work and only need small edits.
-- `index.ts` and `credential.ts` change; `model.ts` folds into `ModelProfile.toPiModel()`.
-- Nothing outside `packages/agent/llm` imports it today, so the move breaks no consumer.
+- `index.ts` and `credential.ts` change; `model.ts` folds into `PiAiFoundryProvider`, which builds each pi-ai `Model`.
+- Nothing outside the archived `llm/` imports it, so the move breaks no consumer.
 
 ## Research: how each Foundry model family authenticates
 
@@ -44,7 +46,7 @@ Lena needs an LLM module modelled on DeepSeek Harness's `packages/llm/llm-pi-ai`
 - **Rejected alternatives:**
   - Passing the JWT as `apiKey` fails on Anthropic, which would send it as `x-api-key`.
   - pi-ai's built-in `azure-openai-responses` provider sends `api-key`, has no Entra support, reads `AZURE_OPENAI_*` env implicitly, and covers one protocol.
-  - pi-agent-core's `getApiKey` belongs to the Agent Lena is dropping.
+  - pi-agent-core's `getApiKey` belongs to the archived agent's pi-agent-core `Agent`.
 
 ## Decisions (the grilled plan)
 
@@ -74,10 +76,10 @@ Lena needs an LLM module modelled on DeepSeek Harness's `packages/llm/llm-pi-ai`
 7. **Tools are `@lena/tool`'s `Tool`** (`packages/tool/tool.ts`); `@lena/llm`'s workspace dependencies are `@lena/tool` and `@lena/datastore`.
    - `LLMRequest.tools` is `readonly Tool[]`; tool results use `ToolContent`. Both are type imports from `@lena/tool/tool`, so the tool index and its built-ins never load.
    - The adapter maps each `Tool` to `{ name, description, parameters }`, so `execute` never reaches pi-ai and the `toJson()` round trip goes.
-   - `@lena/tool` depends on `@lena/agent` only for `DELETION_PATTERN`. Moving that constant into `@lena/tool` breaks the future cycle `agent → llm → tool → agent`.
+   - `@lena/tool` depended on the archived `@lena/agent` only for `DELETION_PATTERN`. Copying that constant into `@lena/tool` removes the dependency, and keeps the new agent loop free of the cycle `agent → llm → tool → agent`.
    - Token limits stay with the caller, so there is no `@lena/util` dependency.
 8. **Drop dsh's machinery:** immutable snapshots, hot reload, catalog merging, `modelOverrides`/`compat` and a credential store.
-   - Config is read once by `DbLlmConfig.load`. After a write, the caller rebuilds `PiAiLLM` from a fresh load.
+   - Config is read once by `SqlModelConfigStore.load`. After a write, the caller rebuilds `PiAiLLM` from a fresh load.
    - pi-ai's default in-memory store is fine because `resolve()` ignores it.
 9. **Adding a provider later** means one more `kind` variant plus one `PiAiXProvider` class.
    - For a provider pi-ai ships, that function can reuse its built-in provider with the configured models, as dsh's `reuseCatalogProvider` does.
@@ -102,19 +104,17 @@ packages/datastore/
 
 ```ts
 interface Database {
-  readonly backend: "sqlite" | "postgres";        // for the rare query that must branch
   query<T>(sql: string, params?: unknown[]): Promise<T[]>;
-  execute(sql: string, params?: unknown[]): Promise<{ rowCount: number }>;
-  transaction<T>(work: (tx: Database) => Promise<T>): Promise<T>;   // commits, or rolls back on throw
-  migrate(ddl: string): Promise<void>;            // runs a module's own idempotent DDL
+  execute(sql: string, params?: unknown[]): Promise<{ rowCount: number }>;   // one statement, DDL included
   close(): Promise<void>;
 }
 function openDatabase(options: { mode: "LOCAL" | "CLOUD"; connection: string }): Database;
 ```
 
-- **`SqliteDatabase`** (LOCAL): one better-sqlite3 handle with WAL, `foreign_keys` and `busy_timeout`, matching today's session store. Transactions run behind a queue, so an `await` inside one cannot interleave another caller's statements on the single handle.
-- **`PostgresDatabase`** (CLOUD): one `pg` pool. A transaction takes a client and hands `work` a `Database` bound to that client.
-- **What it normalises:** placeholders (modules write `$1`, which becomes `?1` for SQLite), and `BIGINT` returned as a number. Booleans are stored as `0`/`1` in both. SQL syntax is not translated.
+- **`SqliteDatabase`** (LOCAL): one better-sqlite3 handle with WAL, `foreign_keys` and `busy_timeout`, matching today's session store.
+- **`PostgresDatabase`** (CLOUD): one `pg` pool.
+- **What it normalises:** placeholders (modules write `$1`, which becomes `?1` for SQLite), and `BIGINT` returned as a number. Booleans are stored as `0`/`1` in both. SQL syntax is not translated, so modules write SQL both backends run.
+- **Kept basic on purpose:** no transactions, no migration runner, no backend flag. Each is added when a caller needs it.
 - **Out of this plan:** moving `@lena/session` onto `@lena/datastore`.
 
 ## Package design: `packages/llm` (`@lena/llm`)
@@ -126,14 +126,12 @@ packages/llm/
   vitest.config.ts     node env (copy of apps/gateway-agent/vitest.config.ts)
   index.ts             LLM, PiAiLLM, re-exports
   types.ts             data types only
-  config.ts            typebox schema, LlmConfig / DbLlmConfig
-  schema.sql           llm_providers, llm_models (portable: runs on SQLite and Postgres)
-  profile.ts           ProviderProfile / DefaultProviderProfile, ModelProfile / DefaultModelProfile
+  model-config-store.ts  table DDL, typebox schema, ModelConfigStore / SqlModelConfigStore
   credential.ts        CredentialProvider, ApiKeyCredentialProvider, EntraCredentialProvider, credentialProviderFor
   foundry-provider.ts  FoundryProvider / PiAiFoundryProvider
   stream-adapter.ts    StreamAdapter / PiAiStreamAdapter
   test/
-    config.test.ts  profile.test.ts  foundry-provider.test.ts  llm.test.ts  live.test.ts
+    model-config-store.test.ts  foundry-provider.test.ts  llm.test.ts  live.test.ts
 ```
 
 **Classes vs types.** Code that holds state or groups related functions is a class implementing an
@@ -142,18 +140,17 @@ interface, following the repo's `Toolbox` / `DefaultToolbox` naming:
 | Interface | Class | Role |
 |---|---|---|
 | `LLM` | `PiAiLLM` | streams one request on the model it names |
-| `LlmConfig` | `DbLlmConfig` | providers and models loaded from the database, lookups, and saving a provider |
-| `ProviderProfile` | `DefaultProviderProfile` | one configured provider: resource, auth, models (≈ dsh `PiAiProviderProfile`) |
-| `ModelProfile` | `DefaultModelProfile` | one configured model (≈ dsh `PiAiModelProfile`) |
+| `ModelConfigStore` | `SqlModelConfigStore` | reads and saves provider and model config in the database, and looks models up |
 | `CredentialProvider` | `ApiKeyCredentialProvider`, `EntraCredentialProvider` | the credential for each request |
-| `FoundryProvider` | `PiAiFoundryProvider` | wraps pi-ai `createProvider` with Foundry auth |
+| `FoundryProvider` | `PiAiFoundryProvider` | turns one `ProviderConfig` into a pi-ai provider: base URLs, pi-ai models, Foundry auth |
 | `StreamAdapter` | `PiAiStreamAdapter` | pi-ai ⇄ Lena translation for one model |
 
 Pure data stays `type`: `LLMRequest`, `LLMEvent`, `LLMMessage`, `LLMToolCall`, `LLMUsage`,
 `LLMStopReason`, `LLMModelInfo`, `FoundryCredential`, and the raw config shapes
-(`ProviderConfig`, `ModelConfig`, `AuthConfig` = `Static<>` of the schema).
+(`ProviderConfig`, `ModelConfig`, `AuthConfig` = `Static<>` of the schema). A provider and its models
+are plain data; there are no per-provider or per-model classes.
 
-**Tables (`schema.sql`)**, using only types both SQLite and Postgres accept:
+**Tables (DDL constants in `model-config-store.ts`)**, using only types both SQLite and Postgres accept:
 
 ```sql
 CREATE TABLE IF NOT EXISTS llm_providers (
@@ -199,12 +196,15 @@ interface LLM {
   listModels(): LLMModelInfo[];                       // frontend picker
   stream(request: LLMRequest): AsyncGenerator<LLMEvent, void>;
 }
-class PiAiLLM implements LLM { constructor(config: LlmConfig) }
-class DbLlmConfig implements LlmConfig {
-  static load(database: Database): Promise<DbLlmConfig>;       // migrates, reads, validates; throws on invalid rows
+class PiAiLLM implements LLM { constructor(store: ModelConfigStore) }
+class SqlModelConfigStore implements ModelConfigStore {
+  static load(database: Database): Promise<SqlModelConfigStore>;  // creates tables if missing, reads, validates; throws on invalid rows
   saveProvider(id: string, config: ProviderConfig): Promise<void>;  // validates, then upserts provider + its models
+  readonly providers: ReadonlyMap<string, ProviderConfig>;
+  findModel(ref: { provider: string; id: string }): { provider: ProviderConfig; model: ModelConfig };  // throws on a miss
+  listModels(): LLMModelInfo[];
 }
-// usage: new PiAiLLM(await DbLlmConfig.load(database)); rebuild after saveProvider
+// usage: new PiAiLLM(await SqlModelConfigStore.load(database)); rebuild after saveProvider
 // LLMRequest gains: model: { provider: string; id: string }; tools?: readonly Tool[]
 // LLMModelInfo: { provider, id, name, api, contextWindow, maxTokens, reasoning, tools }
 ```
@@ -216,77 +216,64 @@ Following Lena's CLAUDE.md:
 
 ## Step-by-step implementation
 
-1. **Break the `tool → agent` edge.**
-   - Move `DELETION_PATTERN` from `packages/agent/tools/bash.ts` into `packages/tool/builtin/bash.ts` and export it.
-   - `packages/agent/tools/bash.ts` imports it from `@lena/tool`, which `agent` already depends on.
-   - Remove `@lena/agent` from `packages/tool/package.json`.
-   - `pnpm --filter @lena/tool typecheck && pnpm --filter @lena/tool test`.
+1. **Detach the workspace from the archived agent.** *(Done: `git mv packages/agent packages/archive/agent`.)*
+   - Copy `DELETION_PATTERN` from `packages/archive/agent/tools/bash.ts` into `packages/tool/builtin/bash.ts`, and remove `@lena/agent` from `packages/tool/package.json`.
+   - `@lena/session`, `@lena/recce` and `apps/gateway-agent` still declare `@lena/agent`, which no longer resolves and makes `pnpm install` fail. Remove that dependency line from each. Their imports of `@lena/agent/*` stay broken until the agent loop rebuilds them, so they are left out of this plan's typecheck.
+   - `pnpm install`, then `pnpm --filter @lena/tool typecheck && pnpm --filter @lena/tool test`.
 2. **Build `@lena/datastore`.**
    - Scaffold `packages/datastore` (`package.json` with `better-sqlite3`, `pg` and their `@types`; `tsconfig.json`; `vitest.config.ts`).
    - `Database` interface, `SqliteDatabase`, `PostgresDatabase` and `openDatabase({ mode, connection })`, which throws on an unknown `mode`.
    - `$n` → `?n` placeholder rewrite for SQLite; `BIGINT` parsed as a number for Postgres.
-   - `sqlite-database.test.ts` runs against a real `:memory:` database: `query`/`execute`, placeholders, `migrate` run twice, commit, rollback on throw, and two concurrent transactions that don't interleave.
+   - `sqlite-database.test.ts` runs against a real `:memory:` database: `query`/`execute`, `$n` placeholders, `rowCount`, and `openDatabase` throwing on an unknown `mode`.
 3. **Scaffold `packages/llm`.**
    - `package.json` with the deps above (including `@lena/tool` and `@lena/datastore` as `workspace:*`) and scripts `typecheck`/`test`.
    - `tsconfig.json` and `vitest.config.ts`, copied from `packages/util` and `apps/gateway-agent`.
    - Run `pnpm install`.
 4. **Move the existing module.**
-   - `git mv packages/agent/llm/* packages/llm/` keeps history.
-   - Remove `@earendil-works/pi-ai` from `packages/agent/package.json`; only `llm/` used it (`agent.ts` uses `@mariozechner/pi-ai`).
-   - Keep `@azure/identity` in agent: `agent.ts` still uses `DefaultAzureCredential` until the loop migration.
+   - `git mv packages/archive/agent/llm/* packages/llm/` keeps history.
+   - The rest of the archive stays as reference and is not built.
 5. **`types.ts`: data types only.**
    - Drop `FoundryAuth`.
    - Add `LLMModelInfo`, `FoundryCredential = { kind: "apiKey"; key } | { kind: "bearer"; token }` and `LLMRequest.model`.
    - `LLMRequest.tools` becomes `readonly Tool[]`; `toolResult.content` stays `string | ToolContent[]`. Both are type imports from `@lena/tool/tool`.
-6. **`profile.ts`.**
-   - `DefaultModelProfile implements ModelProfile`:
-     - fields `id`, `name` (defaults to `id`), `api`, `contextWindow`, `maxTokens`, `reasoning`, `tools`;
-     - `toPiModel(provider)` builds `Model<Api>`: `baseUrl` from `provider.baseUrlFor(api)`, zero cost, input `["text"]`;
-     - `toInfo(providerId)` for the picker;
-     - `assertAcceptsTools(tools?: readonly Tool[])` throws on a tools request to a `tools: false` model.
-   - `DefaultProviderProfile implements ProviderProfile`:
-     - fields `id`, `kind`, `resource`, `auth`, `models`; the constructor throws on a duplicate model id (the table's primary key is the backstop);
-     - `baseUrlFor(api)` builds `https://<res>.services.ai.azure.com/{openai/v1|anthropic}` and throws on any other `api`;
-     - `model(id)` throws on a miss, naming provider and id;
-     - `toPiModels()`.
-7. **`schema.sql` and `config.ts`.**
-   - `schema.sql` holds the two tables above, written once in SQL both backends run.
-   - The typebox schema covers `ProviderConfig`: `kind: "foundry"`, `resource`, the auth union, and models with `id`, `api ∈ {openai-responses, openai-completions, anthropic-messages}`, `contextWindow`, `maxTokens`, `tools`, and optional `reasoning`/`name`.
-   - `DbLlmConfig.load(database)`:
-     1. `database.migrate(schema.sql)`;
+6. **`model-config-store.ts`.**
+   - The two `CREATE TABLE IF NOT EXISTS` statements above are constants, written once in SQL both backends run.
+   - The typebox schema covers `ProviderConfig`: `kind: "foundry"`, `resource`, the auth union, and models with `id`, `api ∈ {openai-responses, openai-completions, anthropic-messages}`, `contextWindow`, `maxTokens`, `tools`, and optional `reasoning`/`name`. `ProviderConfig`, `ModelConfig` and `AuthConfig` are its `Static<>` types.
+   - `SqlModelConfigStore.load(database)`:
+     1. `database.execute` each `CREATE TABLE IF NOT EXISTS`;
      2. select both tables, ordered by provider id and model id;
-     3. assemble each provider's rows into a `ProviderConfig` and run `Value.Check`; an invalid row throws naming the provider and the first `Value.Errors` entry;
-     4. build a `DefaultProviderProfile` for each.
-   - `saveProvider(id, config)`: `Value.Check`, then `new DefaultProviderProfile(id, config)` to validate. In one `database.transaction`, it upserts the provider row, deletes that provider's model rows and inserts the new ones. Removing a model row is config, not an Azure resource.
-   - Instance methods: `providers`, `provider(id)` (throws on unknown), `model({ provider, id })`, `listModels()`.
-8. **`credential.ts`.**
+     3. assemble each provider's rows into a `ProviderConfig` and run `Value.Check`; an invalid row throws naming the provider and the first `Value.Errors` entry.
+   - `saveProvider(id, config)`: `Value.Check` and a duplicate-model-id check (naming the id) run first, so invalid input writes nothing. Then it upserts the provider row (`INSERT … ON CONFLICT (id) DO UPDATE`), deletes that provider's model rows and inserts the new ones. Removing a model row is config, not an Azure resource.
+   - `providers`; `findModel({ provider, id })` returns `{ provider, model }` and throws on a miss, naming provider and id; `listModels()` maps every model to `LLMModelInfo` (`name` defaults to `id`).
+7. **`credential.ts`.**
    - `interface CredentialProvider { get(): Promise<FoundryCredential> }`.
    - `ApiKeyCredentialProvider(apiKeyEnv)` reads `process.env[apiKeyEnv]` per call and throws if it is empty.
    - `EntraCredentialProvider(tokenCredential)` wraps `getBearerTokenProvider(credential, FOUNDRY_SCOPE)`.
    - `credentialProviderFor(auth)` is the one switch on auth kind: `ManagedIdentityCredential(clientId ? { clientId } : undefined)` or `ClientSecretCredential` (throws if the secret env is unset), ending in an exhaustive `never` check.
-9. **`foundry-provider.ts`.**
-   - `PiAiFoundryProvider(profile, credentials: CredentialProvider)` exposes `piProvider`, built with `createProvider({ id, name: id, auth: { apiKey: { name: id, resolve } }, models: profile.toPiModels(), api: { "openai-responses": openAIResponsesApi(), "openai-completions": openAICompletionsApi(), "anthropic-messages": anthropicMessagesApi() } })`, using the `*.lazy` imports.
+8. **`foundry-provider.ts`.**
+   - `PiAiFoundryProvider(id, config: ProviderConfig, credentials: CredentialProvider)` exposes `piProvider`, built with `createProvider({ id, name: id, auth: { apiKey: { name: id, resolve } }, models: config.models.map(toPiModel), api: { "openai-responses": openAIResponsesApi(), "openai-completions": openAICompletionsApi(), "anthropic-messages": anthropicMessagesApi() } })`, using the `*.lazy` imports.
+   - Private `baseUrlFor(api)` builds `https://<res>.services.ai.azure.com/{openai/v1|anthropic}` and throws on any other `api`.
+   - Private `toPiModel(model)` builds `Model<Api>`: `provider: id`, `baseUrl` from `baseUrlFor`, zero cost, input `["text"]`, limits from the config.
    - Private `resolveAuth()` maps the credential to `{ auth: { apiKey } }` or `{ auth: { headers: { Authorization: \`Bearer ${token}\` } } }`.
    - Injecting `CredentialProvider` is the test seam for bearer auth without Entra.
-10. **`stream-adapter.ts`.**
+9. **`stream-adapter.ts`.**
     - `PiAiStreamAdapter(model)` with `toPiContext(request)` and `toLLMEvent(event)`; today's helpers become private methods.
     - Tools map as `request.tools?.map(({ name, description, parameters }) => ({ name, description, parameters }))`.
     - Confirm, and test, that a `resolve()` failure (bad secret, MI unavailable) arrives as a pi-ai `error` event and becomes exactly one Lena `error` event, never a throw.
-11. **`index.ts`.** `class PiAiLLM implements LLM`:
-    - The constructor calls `createModels()` and, for each provider, `switch (kind)` → `setProvider(new PiAiFoundryProvider(profile, credentialProviderFor(profile.auth)).piProvider)`, ending in an exhaustive `never` check.
-    - `listModels()` delegates to the config.
+10. **`index.ts`.** `class PiAiLLM implements LLM`:
+    - The constructor calls `createModels()` and, for each provider, `switch (kind)` → `setProvider(new PiAiFoundryProvider(id, config, credentialProviderFor(config.auth)).piProvider)`, ending in an exhaustive `never` check.
+    - `listModels()` delegates to the store.
     - `stream(request)`:
-      1. `config.model(request.model)`;
-      2. `assertAcceptsTools(request.tools)`;
+      1. `store.findModel(request.model)`;
+      2. throw if `request.tools?.length` and the model has `tools: false`;
       3. `models.getModel(provider, id)`;
       4. `new PiAiStreamAdapter(model)`;
       5. `models.streamSimple(model, adapter.toPiContext(request), { signal, temperature, maxTokens })`;
       6. map events with `adapter.toLLMEvent`.
-    - No `createLLM`: callers write `new PiAiLLM(await DbLlmConfig.load(database))`.
-12. **Unit tests (vitest, beside the code).** The database is a real in-memory SQLite (`openDatabase({ mode: "LOCAL", connection: ":memory:" })`); only `fetch` and the credential source are faked.
-    - **`config.test.ts`:** a `saveProvider` → `load` round trip; `saveProvider` rejects an unknown `kind`/`api`, missing `contextWindow`/`tools`, an invalid auth union and a duplicate model id, writing nothing; re-saving a provider replaces its models; `load` rejects a hand-inserted invalid row; lookups throw on an unknown provider or model.
-    - **`profile.test.ts`:** duplicate model id, `baseUrlFor` per protocol, `toPiModel` fields, `assertAcceptsTools`.
-    - **`foundry-provider.test.ts`:** a fake `CredentialProvider` and a fake `fetch` (`ProviderRequestOptions.fetch`) assert the URL and header per request:
+    - No `createLLM`: callers write `new PiAiLLM(await SqlModelConfigStore.load(database))`.
+11. **Unit tests (vitest, beside the code).** The database is a real in-memory SQLite (`openDatabase({ mode: "LOCAL", connection: ":memory:" })`); only `fetch` and the credential source are faked.
+    - **`model-config-store.test.ts`:** a `saveProvider` → `load` round trip; `saveProvider` rejects an unknown `kind`/`api`, missing `contextWindow`/`tools`, an invalid auth union and a duplicate model id, writing nothing; re-saving a provider replaces its models; `load` rejects a hand-inserted invalid row; `findModel` throws on an unknown provider or model; `listModels` fields.
+    - **`foundry-provider.test.ts`:** a fake `CredentialProvider` and a fake `fetch` (`ProviderRequestOptions.fetch`) assert the URL (one per protocol, from `baseUrlFor`) and header per request:
 
       | Credential | openai-* | anthropic-messages |
       |---|---|---|
@@ -294,18 +281,19 @@ Following Lena's CLAUDE.md:
       | bearer | `Authorization: Bearer jwt` | `Authorization: Bearer jwt` (no `x-api-key`) |
 
     - **`llm.test.ts`** (`vi.stubGlobal("fetch")`): a request with a real `Tool` reaches `fetch` with only `name`, `description` and `parameters`; a tools request to a `tools: false` model throws; an unset `apiKeyEnv` yields exactly one `error` event.
-13. **Live test (`test/live.test.ts`, skips without env).**
-    - Seeds an in-memory SQLite through `saveProvider` from env, then builds `PiAiLLM` from `DbLlmConfig.load`.
+12. **Live test (`test/live.test.ts`, skips without env).**
+    - Seeds an in-memory SQLite through `saveProvider` from env, then builds `PiAiLLM` from `SqlModelConfigStore.load`.
     - Keeps its shape: `Tool` objects with `execute`, passed as `tools: [tool]`, results from `tool.execute(...)`.
     - Run {GPT via Responses, DeepSeek via Completions, Claude via Messages} × {API key, service principal} against one Foundry resource.
     - Each case asserts a text reply and one tool-call round trip. The DeepSeek case also asserts `thinking` events; if they are missing, add an optional `compat` to the model schema then.
     - Managed identity, system- and user-assigned, is run once from an Azure-hosted environment.
-14. **Typecheck and test:** `pnpm --filter @lena/tool test`, `pnpm --filter @lena/datastore test`, `pnpm --filter @lena/llm typecheck && pnpm --filter @lena/llm test`, plus `pnpm -r typecheck`.
+13. **Typecheck and test:** `pnpm --filter @lena/tool test`, `pnpm --filter @lena/datastore test`, `pnpm --filter @lena/llm typecheck && pnpm --filter @lena/llm test`, plus `pnpm --filter @lena/util --filter @lena/datastore --filter @lena/tool --filter @lena/llm typecheck`. A workspace-wide `pnpm -r typecheck` stays red until the agent loop restores session, recce and gateway-agent.
 
 ## Out of scope (noted gaps)
 
-- **Moving `agent.ts` / `apps/gateway-agent` off pi 0.73 + `DefaultAzureCredential` onto `@lena/llm`.** This belongs with `docs/plan/agent-loop.md`. Its `LoopOptions.llm: LLM` now imports from `@lena/llm`, and the loop passes `model` per request.
+- **Next: the agent loop, built from scratch** (`docs/plan/agent-loop.md`). It replaces the archived agent, uses `LLM` from `@lena/llm` and passes `model` per request, and brings `@lena/session`, `@lena/recce` and `apps/gateway-agent` back to green; they lose `@lena/agent` in step 1.
 - **Moving `@lena/session` onto `@lena/datastore`.** Its two stores collapse into one over `Database`; a plan of its own.
+- **`Database.transaction`, a migration runner, and a backend flag.** Without a transaction, a database error partway through `saveProvider` can leave a provider with only some of its models. Validation runs before any write, so only a failure inside the database can cause this. Add `transaction` when that matters or when session moves over.
 - **Wiring the app:** opening the one `Database` from `MODE` and the connection string at startup, and passing it to every store.
 - **The frontend and API that call `saveProvider`**, and removing a whole provider.
 - **First run with an empty database.** No provider means no model; the frontend's first-run step, or an env seed, fills it.
@@ -315,11 +303,11 @@ Following Lena's CLAUDE.md:
 
 ## Verification
 
-- Steps 12–14 above.
+- Steps 11–13 above.
 - The plan is done when:
   - all unit tests pass, including `@lena/datastore`'s;
   - the live matrix passes for API key and service principal;
-  - `pnpm -r typecheck` is green.
+  - `@lena/util`, `@lena/datastore`, `@lena/tool` and `@lena/llm` typecheck green.
 
 ## Sources
 
