@@ -98,7 +98,11 @@ A leaf package with no `@lena/*` dependencies. It runs SQL, it doesn't know any 
 ```
 packages/datastore/
   package.json         @lena/datastore, deps: better-sqlite3, pg
-  index.ts             Database, SqliteDatabase, PostgresDatabase, openDatabase
+  tsconfig.json        copy of packages/tool (typechecks the tests too)
+  database.ts          Database interface, DatabaseMode (leaf: both backends import it)
+  sqlite-database.ts   SqliteDatabase
+  postgres-database.ts PostgresDatabase
+  index.ts             openDatabase, re-exports
   test/
     sqlite-database.test.ts
 ```
@@ -114,7 +118,7 @@ function openDatabase(options: { mode: "LOCAL" | "CLOUD"; connection: string }):
 
 - **`SqliteDatabase`** (LOCAL): one better-sqlite3 handle with WAL, `foreign_keys` and `busy_timeout`, matching today's session store.
 - **`PostgresDatabase`** (CLOUD): one `pg` pool.
-- **What it normalises:** placeholders (modules write `$1`, which becomes `?1` for SQLite), and `BIGINT` returned as a number. Booleans are stored as `0`/`1` in both. SQL syntax is not translated, so modules write SQL both backends run.
+- **What it normalises:** placeholders and `BIGINT`. Modules write `$1`, `$2`, … for both backends; SQLite reads `$1` as a parameter named `1`, so `SqliteDatabase` binds the array as `{ "1": …, "2": … }` and never rewrites SQL text. PostgreSQL `BIGINT` is returned as a number, and throws outside the safe-integer range. Booleans are stored as `0`/`1` in both. SQL syntax is not translated, so modules write SQL both backends run.
 - **Kept basic on purpose:** no transactions, no migration runner, no backend flag. Each is added when a caller needs it.
 - **Out of this plan:** moving `@lena/session` onto `@lena/datastore`.
 
@@ -221,11 +225,12 @@ Following Lena's CLAUDE.md:
    - `@lena/tool` was already detached in code (`AzureShellTool` in `builtin/azure-shell.ts` owns `DELETION_PATTERN`); its leftover `@lena/agent` dependency line is removed.
    - The `@lena/agent` dependency line is removed from `@lena/session`, `@lena/recce` and `apps/gateway-agent`. Their `@lena/agent/*` imports stay broken until the agent loop rebuilds them, so they are left out of this plan's typecheck.
    - Verified: `pnpm install` resolves 7 workspace projects; `@lena/tool` typechecks and its 27 tests pass.
-2. **Build `@lena/datastore`.**
-   - Scaffold `packages/datastore` (`package.json` with `better-sqlite3`, `pg` and their `@types`; `tsconfig.json`; `vitest.config.ts`).
-   - `Database` interface, `SqliteDatabase`, `PostgresDatabase` and `openDatabase({ mode, connection })`, which throws on an unknown `mode`.
-   - `$n` → `?n` placeholder rewrite for SQLite; `BIGINT` parsed as a number for Postgres.
-   - `sqlite-database.test.ts` runs against a real `:memory:` database: `query`/`execute`, `$n` placeholders, `rowCount`, and `openDatabase` throwing on an unknown `mode`.
+2. **Build `@lena/datastore`.** ✅ *Done.*
+   - `packages/datastore`: `package.json` (`better-sqlite3`, `pg` and their `@types`) and `tsconfig.json`. No `vitest.config.ts`: vitest's defaults find `test/*.test.ts` in a node environment, as in `@lena/tool`.
+   - `database.ts` (`Database`, `DatabaseMode`), `sqlite-database.ts` (`SqliteDatabase`), `postgres-database.ts` (`PostgresDatabase`), and `index.ts` with `openDatabase({ mode, connection })`, which throws on an unknown `mode`.
+   - Placeholders: better-sqlite3 rejects positional `?1` with an array, so instead of rewriting `$n` → `?n`, SQLite binds `$n` by name. `$n` inside a string literal stays text.
+   - Postgres: a pool-local type parser returns `BIGINT` as a number and throws outside the safe-integer range. Not exercised yet: there is no Postgres in the test run.
+   - Verified: `test/sqlite-database.test.ts` runs 7 tests against a real `:memory:` database (LOCAL opens SQLite, unknown mode throws, DDL/insert/select, reused and literal `$n`, `rowCount`, missing parameter throws); typecheck is clean.
 3. **Scaffold `packages/llm`.**
    - `package.json` with the deps above (including `@lena/tool` and `@lena/datastore` as `workspace:*`) and scripts `typecheck`/`test`.
    - `tsconfig.json` and `vitest.config.ts`, copied from `packages/util` and `apps/gateway-agent`.
