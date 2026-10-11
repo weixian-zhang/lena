@@ -10,7 +10,6 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@lena/agent": "workspace:*",
     "@mariozechner/pi-agent-core": "^0.73.1"
   },
   "devDependencies": {
