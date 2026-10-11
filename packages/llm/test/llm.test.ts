@@ -14,7 +14,9 @@ afterEach(() => {
 });
 
 test("a provider config streams a reply into LLM events", async () => {
-
+  
+  // The SDK calls Foundry through the global fetch; this returns a canned reply stream instead,
+  // so the test runs offline while pi-ai, the SDK parser and the adapter still run for real.
   vi.stubGlobal("fetch", async () => sseResponse(REPLY_CHUNKS));
 
   const model: ModelConfig = {
@@ -33,9 +35,9 @@ test("a provider config streams a reply into LLM events", async () => {
   };
 
   const llm = new PiAiLLM("foundry-test", provider, model);
-  
+
   const events: LLMEvent[] = [];
-  
+
   for await (const event of llm.stream({
     messages: [{ role: "user", content: "Say hello." }],
   }))
