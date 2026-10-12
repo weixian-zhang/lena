@@ -1,195 +1,99 @@
-# LLM package: Foundry-first, pi-ai routed
+# LLM package: Foundry only, through the OpenAI SDK
 
 ## Context
 
-Lena needs an LLM module modelled on DeepSeek Harness's `packages/llm/llm-pi-ai`: pi-ai handles provider routing and the streaming contract, and Lena owns auth and config.
+Lena needs an LLM module that streams one model call at a time, with tools and thinking, for the agent loop.
+
+**What changed in this revision:**
+- **pi-ai is dropped.** Lena will only ever call Microsoft Foundry, so a multi-provider router adds a layer without a use. Lena calls Foundry's v1 endpoint with the plain **OpenAI SDK** (`openai` ^6), so users can pick any deployment Foundry serves there.
+- **No Foundry SDK.** `@azure/ai-projects` adds agents, evaluations and Foundry tools Lena doesn't use; for model calls its `getOpenAIClient()` only builds the same `OpenAI` client against a project URL. Using `openai` directly drops a package and the need for a Foundry project.
+- **The config store is removed.** A separate config module, still to be built, stores global configuration, including the model and the authentication method. `@lena/llm` stores nothing; the caller passes what it needs.
 
 **v1 scope:**
-- **Provider:** Microsoft Foundry only.
-- **Auth kinds:** Entra ID only: managed identity (system- or user-assigned) and service principal. Foundry API keys are not supported.
-- **Model families:** GPT (Responses), other Foundry models such as DeepSeek, Mistral and Grok (Chat Completions), and Claude (Anthropic Messages).
-- **Model picker:** a future desktop frontend lets users pick a model, so providers and models live in Lena's database (SQLite locally, Postgres in the cloud) and the package lists them.
-- **New providers** must be additive later.
+- **Provider:** Microsoft Foundry only, through the resource's `/openai/v1` endpoint.
+- **Auth:** Entra ID only, three kinds: service principal, system-assigned managed identity and user-assigned managed identity. No API keys.
+- **Protocol:** the Responses API only. One protocol means one adapter and no per-model `api` field.
 
-**The old agent is archived.** `packages/agent` now lives at `packages/archive/agent`, outside the pnpm workspace, so `@lena/agent` no longer resolves. Nothing new depends on it. After this LLM module, the agent loop is built from scratch on `@lena/llm` (`docs/plan/agent-loop.md`).
+**The old agent is archived** at `packages/archive/agent`, outside the pnpm workspace. After this module, the agent loop is built from scratch on `@lena/llm` (`docs/plan/agent-loop.md`).
 
-**Where it lives:** a new top-level package `packages/llm` (`@lena/llm`, the directory already exists and is empty). The archived `packages/archive/agent/llm` (pi-ai 0.85.1) is **moved and evolved**, not rewritten:
-- `stream-adapter.ts` (pi-ai ⇄ Lena events and messages) and `types.ts` already work and only need small edits.
-- `index.ts` and `credential.ts` change; `model.ts` folds into `PiAiLLM`, which builds the pi-ai `Model` and provider itself.
-- Nothing outside the archived `llm/` imports it, so the move breaks no consumer.
+## Research: Foundry's endpoints and the OpenAI SDK
 
-## Research: how each Foundry model family authenticates
+From Microsoft's [SDK overview](https://learn.microsoft.com/en-us/azure/foundry/how-to/develop/sdk-overview) (updated 2026-10-07) and the [v1 API doc](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle):
 
-**Auth belongs to the Foundry resource, not the model family.**
-- One credential, one Entra scope `https://ai.azure.com/.default` (Microsoft: "Tokens must be issued with scope `https://ai.azure.com/.default`"), and one RBAC role (**Cognitive Services User** / **Foundry User** on the resource) cover every deployment.
-- What differs per family is the route and protocol, and therefore which header carries the credential.
+| SDK | Endpoint | Serves |
+|---|---|---|
+| **OpenAI SDK** (`openai` ^6): **the one Lena uses** | `https://<res>.services.ai.azure.com/openai/v1` (or `<res>.openai.azure.com/openai/v1`) | Responses for Azure OpenAI models and Foundry Models sold by Azure (MAI, DeepSeek, Grok); Chat Completions for other models sold by Azure |
+| Foundry SDK (`@azure/ai-projects` 2.8.0) | `https://<res>.services.ai.azure.com/api/projects/<project>` | The same Responses API through a project, plus agents, evaluations and Foundry tools. Not needed. |
+| Anthropic SDK | `https://<res>.services.ai.azure.com/anthropic` | Claude only: "Claude models use a separate `/anthropic` endpoint and the Anthropic Messages API, not the OpenAI-compatible endpoint." |
 
-| Family | Route on `https://<res>.services.ai.azure.com` | pi-ai `api` | Entra header (MI / SP) |
-|---|---|---|---|
-| Azure OpenAI (GPT-5.x, gpt-oss) | `/openai/v1` | `openai-responses` (or `openai-completions`) | `Authorization: Bearer <jwt>` |
-| DeepSeek, Mistral Large 3, Llama, Grok, Kimi, Cohere Command | `/openai/v1` | `openai-completions`. Responses works only for some (DeepSeek, Llama, Grok); the others return `400 Model not supported` | same |
-| Claude (Hosted on Azure or on Anthropic) | `/anthropic` (not served on `openai.azure.com`) | `anthropic-messages` | `Authorization: Bearer <jwt>` |
+- **One client serves every deployment.** The endpoint is per resource, and the deployment is the per-request `model` field, so swapping deployments needs no new client or endpoint.
+- **Auth.** Microsoft's JavaScript sample for the v1 API:
+  ```ts
+  new OpenAI({
+    baseURL: "https://<res>.services.ai.azure.com/openai/v1",
+    apiKey: getBearerTokenProvider(credential, "https://ai.azure.com/.default"),
+  });
+  ```
+  The token provider runs on every request and `@azure/identity` caches and refreshes the token, so Lena passes in only a `TokenCredential`. The identity needs **Cognitive Services OpenAI User** on the resource.
+- **Request `model`:** the deployment name.
+- **Thinking.** The `openai` SDK's `ReasoningEffort` is `none | minimal | low | medium | high | xhigh | max`, which already matches `LLM_THINKING_LEVELS`. Visible thinking needs `reasoning: { summary: "auto" }`.
+- **Claude is not reachable this way.** It needs the Anthropic SDK on `/anthropic`. See *Open questions*.
 
-- **Why Entra only:** no long-lived key to store, rotate or leak, and access is governed by RBAC on the resource.
+## Decisions
 
-- **Request `model`:** always the deployment name.
-- **Claude hosting option:** changes features, not auth.
-- **Out of scope:**
-  - Legacy serverless API deployments (`*.models.ai.azure.com`) are key-only, with an endpoint and key per deployment.
-  - Non-chat models (Mistral OCR/Document AI, Cohere rerank/parse).
-- **No tool calling:** Llama-3.3-70B, Llama-4-Maverick and mistral-medium-3-5 cannot call tools, so they cannot drive Lena's loop.
+1. **One SDK: `openai`.** `FoundryLLM` builds one `OpenAI` client in its constructor and reuses it for every request.
+2. **Responses API only.** It's the protocol Microsoft recommends on the v1 endpoint.
+   - `stream()` calls `openai.responses.create({ …, stream: true })`.
+   - `store: false`: every request carries the full conversation, so nothing is kept server-side.
+3. **The caller passes config as data; `@lena/llm` stores nothing.**
+   - `FoundryLLM` takes `{ foundryName, credential, model }`.
+   - The future config module reads the model and auth method from global configuration. It turns the auth method into a credential with `createTokenCredential(auth)`, which `@lena/llm` exports.
+   - Validating the stored config is the config module's job. `FoundryLLM` throws only on an empty `foundryName` or `model`.
+4. **Auth is Entra ID only, as a `TokenCredential`.**
+   - `createTokenCredential(auth)` switches on three explicit kinds, ending in an exhaustive `never` check:
 
-**How this maps onto pi-ai 0.85.1:**
-- `Provider.auth.apiKey.resolve()` runs **on every request** with no caching (`dist/auth/resolve.js`). It does not see the model, and it doesn't need to. Despite its name, `apiKey` is pi-ai's only non-OAuth auth hook; Lena returns a header from it, never a key:
-  - It returns `{ auth: { headers: { Authorization: "Bearer <jwt>" } } }`.
-    - On openai-*, `getClientApiKey` accepts header-only auth, and the default headers override the SDK's placeholder Bearer.
-    - On anthropic-messages, `assertRequestAuth` accepts the header and no `x-api-key` is sent.
-- **Rejected alternatives:**
-  - Passing the JWT as `apiKey` fails on Anthropic, which would send it as `x-api-key`.
-  - pi-ai's built-in `azure-openai-responses` provider sends `api-key`, has no Entra support, reads `AZURE_OPENAI_*` env implicitly, and covers one protocol.
-  - pi-agent-core's `getApiKey` belongs to the archived agent's pi-agent-core `Agent`.
+     | `AuthConfig` | Credential |
+     |---|---|
+     | `{ kind: "servicePrincipal", tenantId, clientId, clientSecretEnv }` | `ClientSecretCredential(tenantId, clientId, process.env[clientSecretEnv])`; throws if the env var is unset |
+     | `{ kind: "systemAssignedManagedIdentity" }` | `ManagedIdentityCredential()` |
+     | `{ kind: "userAssignedManagedIdentity", clientId }` | `ManagedIdentityCredential({ clientId })` |
 
-## Decisions (the grilled plan)
-
-1. **One pi-ai `Provider` per configured provider**, built with `createProvider`, as dsh does for non-catalog routes (`dsh provider.ts buildProvider`/`PROTOCOLS`).
-   - Auth lives in that provider's `resolve()`.
-   - The route key is the same value everywhere: config key, `Provider.id` and `Model.provider`. pi-ai resolution is then `models.getModel(provider, id)`.
-2. **The provider owns auth and the resource; each model owns its protocol.**
-   - `api` is explicit per model and is never inferred from the name.
-   - Config stores the resource **name**; `foundryBaseUrl(resource, api)` builds `https://<res>.services.ai.azure.com/{openai/v1|anthropic}`. One host serves all three protocols.
-3. **Two auth kinds, both Entra ID and both explicit:**
-   - `managedIdentity{clientId?}`
-   - `servicePrincipal{tenantId, clientId, clientSecretEnv}`
-
-   Also:
-   - No Foundry API keys: an `apiKey` auth kind is rejected by the schema.
-   - Drop `deviceCodeUserToken` (a static token that dies in about an hour).
-   - No `DefaultAzureCredential` chain and no implicit `AZURE_OPENAI_*` env.
-4. **No secrets in the database.** The frontend will write the config, so the `auth` column holds env-var names only. Managed identity is the recommended production choice.
-5. **The model is chosen per request.** `LLMRequest.model = { provider, id }`, so one `LLM` serves every configured model and the frontend switches freely.
-6. **Fail loud.** Each of these throws with the offending value:
-   - an unknown provider, model, `kind` or `api`;
-   - a duplicate model id;
-   - a missing secret env var;
-   - a thinking level requested from a model not configured with `reasoning: true`.
-
-   `contextWindow` and `maxTokens` are required per model; today's silent `CONTEXT_WINDOW_TOKENS` fallback is removed.
-7. **Tools are `@lena/tool`'s `Tool`** (`packages/tool/tool.ts`); `@lena/llm`'s workspace dependencies are `@lena/tool` and `@lena/datastore`.
-   - `LLMRequest.tools` is `readonly Tool[]`; tool results use `ToolContent`. Both are type imports from `@lena/tool/tool`, so the tool index and its built-ins never load.
-   - The adapter maps each `Tool` to `{ name, description, parameters }`, so `execute` never reaches pi-ai and the `toJson()` round trip goes.
-   - `@lena/tool` no longer imports the archived `@lena/agent`: the bash tool is now `AzureShellTool` (`packages/tool/builtin/azure-shell.ts`), which owns `DELETION_PATTERN`. Only a stale `@lena/agent` line in `packages/tool/package.json` remains; removing it keeps the new agent loop free of the cycle `agent → llm → tool → agent`.
-   - Token limits stay with the caller, so there is no `@lena/util` dependency.
-8. **Drop dsh's machinery:** immutable snapshots, hot reload, catalog merging, `modelOverrides`/`compat` and a credential store.
-   - Config is read once by `SqlModelConfigStore.load`. The caller picks one provider and model from `store.providers` and builds `PiAiLLM` from them; `PiAiLLM` never sees the store or the catalog. After a write, the caller rebuilds `PiAiLLM`.
-   - pi-ai's default in-memory store is fine because `resolve()` ignores it.
-9. **Adding a provider later** means one more `kind` variant. `PiAiLLM` builds the Foundry provider inline today; the second kind is when provider construction moves out into one function or class per kind, picked by a `switch (kind)`.
-   - For a provider pi-ai ships, that function can reuse its built-in provider with the configured models, as dsh's `reuseCatalogProvider` does.
-   - Routing does not change.
-10. **Config lives in the database, through a shared `@lena/datastore`.**
-    - `@lena/datastore` handles connection and query execution only, and knows no module's schema. It is the only package that imports `better-sqlite3` or `pg`.
-    - `@lena/llm` owns its tables, DDL and SQL, and passes them to the `Database` it is given.
-    - One `Database` per process, opened by the app and shared by every store.
-    - A database replaces `~/.lena/models.json`: cloud replicas share Postgres, while a file on a container disk would be lost and unshared.
-
-## Package design: `packages/datastore` (`@lena/datastore`)
-
-A leaf package with no `@lena/*` dependencies. It runs SQL, it doesn't know any module's tables.
-
-```
-packages/datastore/
-  package.json         @lena/datastore, deps: better-sqlite3, pg
-  tsconfig.json        copy of packages/tool (typechecks the tests too)
-  database.ts          Database interface, DatabaseMode (leaf: both backends import it)
-  sqlite-database.ts   SqliteDatabase
-  postgres-database.ts PostgresDatabase
-  index.ts             openDatabase, re-exports
-  test/
-    sqlite-database.test.ts
-```
-
-```ts
-interface Database {
-  query<T>(sql: string, params?: unknown[]): Promise<T[]>;
-  execute(sql: string, params?: unknown[]): Promise<{ rowCount: number }>;   // one statement, DDL included
-  close(): Promise<void>;
-}
-function openDatabase(options: { mode: "LOCAL" | "CLOUD"; connection: string }): Database;
-```
-
-- **`SqliteDatabase`** (LOCAL): one better-sqlite3 handle with WAL, `foreign_keys` and `busy_timeout`, matching today's session store.
-- **`PostgresDatabase`** (CLOUD): one `pg` pool.
-- **What it normalises:** placeholders and `BIGINT`. Modules write `$1`, `$2`, … for both backends; SQLite reads `$1` as a parameter named `1`, so `SqliteDatabase` binds the array as `{ "1": …, "2": … }` and never rewrites SQL text. PostgreSQL `BIGINT` is returned as a number, and throws outside the safe-integer range. Booleans are stored as `0`/`1` in both. SQL syntax is not translated, so modules write SQL both backends run.
-- **Kept basic on purpose:** no transactions, no migration runner, no backend flag. Each is added when a caller needs it.
-- **Out of this plan:** moving `@lena/session` onto `@lena/datastore`.
+   - System- and user-assigned are separate kinds, not one kind with an optional `clientId`: a missing `clientId` would otherwise switch silently to the system-assigned identity.
+   - There's no `DefaultAzureCredential` chain and no API keys.
+   - `FoundryLLM` turns the credential into the client's `apiKey` with `createFoundryTokenProvider(credential)` from `credential.ts`, which keeps `FOUNDRY_SCOPE` private.
+   - Taking a credential, not an auth config, is also the test seam: the unit test passes a fake credential and contacts no Entra.
+5. **One model per `FoundryLLM`.** The caller picks the deployment. Switching models means building another `FoundryLLM`; keep one per session and model.
+6. **Model limits and capabilities live with the caller.** `@lena/llm` keeps no `contextWindow`, `maxTokens` or `reasoning` per model.
+   - Per request, `maxTokens` and `thinkingLevel` are passed straight through.
+   - A deployment that rejects them fails loudly with Foundry's own `400`, which arrives as an `error` event.
+7. **Tools are `@lena/tool`'s `Tool`** (type import from `@lena/tool/tool`).
+   - Each tool is sent as `{ type: "function", name, description, parameters, strict: false }`.
+   - `execute` never leaves the process.
+8. **The event contract stays** (`LLMEvent`: `thinking`, `tool_call`, `done`, `error`), so the agent loop plan is unaffected.
+   - Every stream ends in exactly one `done` or `error`.
+   - SDK and HTTP failures, auth included, become an `error` event and are never thrown out of `stream()`.
 
 ## Package design: `packages/llm` (`@lena/llm`)
 
 ```
 packages/llm/
-  package.json         @lena/llm, exports {"./*": "./*.ts"}, deps: @earendil-works/pi-ai ^0.85.1, @azure/identity ^4.13.1, typebox, @lena/tool, @lena/datastore
-  tsconfig.json        copy of packages/datastore (typechecks the tests too)
-  index.ts             LLM, PiAiLLM, re-exports
-  types.ts             data types only
-  provider-config.ts   typebox schema, ProviderConfig / ModelConfig / AuthConfig, assertValidProviderConfig
-  model-config-store.ts  table DDL, ModelConfigStore / SqlModelConfigStore
-  credential.ts        CredentialProvider, EntraCredentialProvider, createCredentialProviderFromAuthConfig
-  stream-adapter.ts    StreamAdapter / PiAiStreamAdapter
+  package.json           @lena/llm, deps: openai ^6, @azure/identity ^4.13.1, @lena/tool
+  tsconfig.json
+  index.ts               LLM, FoundryLLM, re-exports
+  types.ts               data types only
+  credential.ts          AuthConfig, createTokenCredential, createFoundryTokenProvider
+  responses-adapter.ts   ResponsesAdapter / FoundryResponsesAdapter
   test/
     llm.test.ts
 ```
 
-**Classes vs types.** Code that holds state or groups related functions is a class implementing an
-interface, following the repo's `Toolbox` / `DefaultToolbox` naming:
-
 | Interface | Class | Role |
 |---|---|---|
-| `LLM` | `PiAiLLM` | built for one caller-chosen provider and model; streams requests on it |
-| `ModelConfigStore` | `SqlModelConfigStore` | reads and saves provider and model config in the database |
-| `CredentialProvider` | `EntraCredentialProvider` | a fresh Entra token for each request |
-| `StreamAdapter` | `PiAiStreamAdapter` | pi-ai ⇄ Lena translation for one model |
+| `LLM` | `FoundryLLM` | built for one Foundry resource and model deployment; streams requests on it |
+| `ResponsesAdapter` | `FoundryResponsesAdapter` | Lena request → Responses request; Responses stream events → `LLMEvent`, for one call |
 
-Pure data stays `type`: `LLMRequest`, `LLMEvent`, `LLMMessage`, `LLMToolCall`, `LLMUsage`,
-`LLMStopReason`, and the raw config shapes
-(`ProviderConfig`, `ModelConfig`, `AuthConfig` = `Static<>` of the schema). A provider and its models
-are plain data; there are no per-provider or per-model classes.
-
-**Tables (DDL constants in `model-config-store.ts`)**, using only types both SQLite and Postgres accept:
-
-```sql
-CREATE TABLE IF NOT EXISTS llm_providers (
-  id        TEXT PRIMARY KEY,   -- our route key, e.g. "foundry-prod"
-  kind      TEXT NOT NULL,      -- "foundry"
-  resource  TEXT NOT NULL,      -- Foundry resource name
-  auth      TEXT NOT NULL       -- JSON auth union; env-var names only, never a secret
-);
-CREATE TABLE IF NOT EXISTS llm_models (
-  provider_id     TEXT NOT NULL REFERENCES llm_providers(id),
-  id              TEXT NOT NULL,      -- deployment name
-  position        INTEGER NOT NULL,   -- order within the provider, as saved
-  name            TEXT,
-  api             TEXT NOT NULL,      -- openai-responses | openai-completions | anthropic-messages
-  context_window  INTEGER NOT NULL,
-  max_tokens      INTEGER NOT NULL,
-  reasoning       INTEGER NOT NULL,   -- 0/1
-  PRIMARY KEY (provider_id, id)
-);
-```
-
-The same configuration as one `ProviderConfig` value, the shape `saveProvider` takes:
-
-```jsonc
-{
-  "kind": "foundry",
-  "resource": "<res>",
-  "auth": { "kind": "managedIdentity", "clientId": "<optional user-assigned>" },
-  // | { "kind": "servicePrincipal", "tenantId": "…", "clientId": "…", "clientSecretEnv": "AZURE_CLIENT_SECRET" }
-  "models": [
-    { "id": "gpt-5.5", "api": "openai-responses", "contextWindow": 1050000, "maxTokens": 128000, "reasoning": true },
-    { "id": "claude-sonnet-5-5", "api": "anthropic-messages", "contextWindow": 1000000, "maxTokens": 64000 },
-    { "id": "DeepSeek-V4-Pro", "api": "openai-completions", "contextWindow": 1000000, "maxTokens": 384000, "reasoning": true }
-  ]
-}
-```
+Pure data stays `type`: `LLMRequest`, `LLMEvent`, `LLMMessage`, `LLMToolCall`, `LLMUsage`, `LLMStopReason`,
+`LLMThinkingLevel`, `AuthConfig`, `FoundryLLMConfig`.
 
 **Public surface:**
 
@@ -197,115 +101,95 @@ The same configuration as one `ProviderConfig` value, the shape `saveProvider` t
 interface LLM {
   stream(request: LLMRequest): AsyncGenerator<LLMEvent, void>;
 }
-class PiAiLLM implements LLM { constructor(providerId: string, provider: ProviderConfig, model: ModelConfig) }  // validates; knows no store or catalog
-class SqlModelConfigStore implements ModelConfigStore {
-  static load(database: Database): Promise<SqlModelConfigStore>;  // creates tables if missing, reads, validates; throws on invalid rows
-  saveProvider(id: string, config: ProviderConfig): Promise<void>;  // validates, then upserts provider + its models
-  readonly providers: ReadonlyMap<string, ProviderConfig>;
-}
-// usage: the caller picks from store.providers, then new PiAiLLM(providerId, provider, model);
-//        keep one per session and model so the credential's token cache is reused
-// LLMRequest carries no model; tools?: readonly Tool[]; thinkingLevel?: LLMThinkingLevel
+type FoundryLLMConfig = { foundryName: string; credential: TokenCredential; model: string };  // resource name, e.g. "lena-prod"
+class FoundryLLM implements LLM { constructor(config: FoundryLLMConfig) }
+function createTokenCredential(auth: AuthConfig): TokenCredential;
+
+// usage, by the future config module or the agent loop:
+const llm = new FoundryLLM({
+  foundryName: "lena-prod", // → https://lena-prod.services.ai.azure.com/openai/v1
+  credential: createTokenCredential({ kind: "systemAssignedManagedIdentity" }),
+  model: "gpt-5.5",
+});
+llm.stream({ systemPrompt, messages, tools, thinkingLevel: "high", signal });
 ```
 
-Following Lena's CLAUDE.md:
-- exported items go first in each file;
-- interface plus a class that `implements` it;
-- comments are 1–3 lines.
+**Mapping (`FoundryResponsesAdapter`):**
+
+| Lena | Responses API |
+|---|---|
+| `systemPrompt` | `instructions` |
+| `user` message | `{ role: "user", content }` |
+| `assistant` message | `{ role: "assistant", content }`, plus one `{ type: "function_call", call_id, name, arguments }` per tool call |
+| `toolResult` message | `{ type: "function_call_output", call_id, output }`; `ToolContent[]` becomes `input_text`/`input_image` items |
+| `thinkingLevel` | `reasoning: { effort, summary: "auto" }` |
+| `maxTokens`, `temperature`, `signal` | `max_output_tokens`, `temperature`, the request's `signal` |
+| `response.reasoning_summary_text.delta`, `response.reasoning_text.delta` | `thinking`, and accumulated into `done.thinking` (parts separated by a blank line) |
+| `response.output_text.delta` | accumulated into `done.text` |
+| `response.output_item.done` with a `function_call` item | `tool_call` (arguments parsed from JSON) |
+| `response.completed` | `done`: `toolUse` if there were tool calls, else `stop`; usage from `input_tokens`/`output_tokens`/`total_tokens` |
+| `response.incomplete` (max output tokens) | `done` with `outputLengthExceeded` |
+| `response.failed`, `error`, a thrown `APIError` | `error`; an aborted signal gives reason `aborted` |
+
+Following Lena's CLAUDE.md: exported items first, an interface plus a class that `implements` it, comments 1–3 lines.
 
 ## Step-by-step implementation
 
-1. **Detach the workspace from the archived agent.** ✅ *Done.*
-   - `git mv packages/agent packages/archive/agent`; the archive sits outside the `packages/*` workspace glob.
-   - `@lena/tool` was already detached in code (`AzureShellTool` in `builtin/azure-shell.ts` owns `DELETION_PATTERN`); its leftover `@lena/agent` dependency line is removed.
-   - The `@lena/agent` dependency line is removed from `@lena/session`, `@lena/recce` and `apps/gateway-agent`. Their `@lena/agent/*` imports stay broken until the agent loop rebuilds them, so they are left out of this plan's typecheck.
-   - Verified: `pnpm install` resolves 7 workspace projects; `@lena/tool` typechecks and its 27 tests pass.
-2. **Build `@lena/datastore`.** ✅ *Done.*
-   - `packages/datastore`: `package.json` (`better-sqlite3`, `pg` and their `@types`) and `tsconfig.json`. No `vitest.config.ts`: vitest's defaults find `test/*.test.ts` in a node environment, as in `@lena/tool`.
-   - `database.ts` (`Database`, `DatabaseMode`), `sqlite-database.ts` (`SqliteDatabase`), `postgres-database.ts` (`PostgresDatabase`), and `index.ts` with `openDatabase({ mode, connection })`, which throws on an unknown `mode`.
-   - Placeholders: better-sqlite3 rejects positional `?1` with an array, so instead of rewriting `$n` → `?n`, SQLite binds `$n` by name. `$n` inside a string literal stays text.
-   - Postgres: a pool-local type parser returns `BIGINT` as a number and throws outside the safe-integer range. Not exercised yet: there is no Postgres in the test run.
-   - Verified: `test/sqlite-database.test.ts` runs 7 tests against a real `:memory:` database (LOCAL opens SQLite, unknown mode throws, DDL/insert/select, reused and literal `$n`, `rowCount`, missing parameter throws); typecheck is clean.
+1. **Detach the workspace from the archived agent.** ✅ *Done.* `packages/agent` → `packages/archive/agent`; the `@lena/agent` dependency lines are removed. `@lena/session`, `@lena/recce` and `apps/gateway-agent` stay red until the agent loop rebuilds them.
+2. **Build `@lena/datastore`.** ✅ *Done* (commit `06b5dc9`). `@lena/llm` no longer depends on it; it stays for the config module and the session store.
 3. **Scaffold `packages/llm`.** ✅ *Done.*
-   - `package.json`: `@azure/identity`, `@earendil-works/pi-ai`, `typebox`, and `@lena/datastore` / `@lena/tool` as `workspace:*`; scripts `typecheck`/`test`; exports `.` → `index.ts` and `./*` → `*.ts`.
-   - `tsconfig.json` copied from `packages/datastore` (typechecks the tests too). No `vitest.config.ts`, as in `@lena/datastore` and `@lena/tool`.
-   - Verified: `pnpm install` links all of them, with vitest's peers resolved. A throwaway vitest file imported `@lena/datastore`, `@lena/tool/tool`, `@azure/identity`, pi-ai's `createProvider`/`createModels` and `api/openai-responses.lazy`, then was deleted. `typecheck` has no inputs until step 4 moves the code in.
-4. **Move the existing module.** ✅ *Done.*
-   - `git mv` of `credential.ts`, `index.ts`, `model.ts`, `stream-adapter.ts`, `types.ts` and `test/live.test.ts` from `packages/archive/agent/llm/` into `packages/llm/`; git records them as renames, so history follows. Nothing left in the archive imported them.
-   - Typecheck after the move shows one expected error: `model.ts` imports `@lena/util/config`, which `@lena/llm` deliberately does not depend on. It went when `model.ts` was folded away (step 8).
-   - `test/live.test.ts` loads `.env` from a path four directories up, which now points outside the repo; it fails quietly by design. Fixed in the live-test rewrite (step 12).
-5. **`types.ts`: data types only.** ✅ *Done.*
-   - Drop `FoundryAuth`.
-   - `LLM_APIS` (with `LLMApi`) lists the three protocols once; the schema's `Type.Enum` uses it. `LLMRequest` names no model: the `LLM` is built for one.
-   - `LLM_THINKING_LEVELS` (with `LLMThinkingLevel`) copies pi-ai's levels: `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. `LLMRequest.thinkingLevel?` picks one; omitted means the provider's default.
-   - `LLMRequest.tools` becomes `readonly Tool[]`; `toolResult.content` stays `string | ToolContent[]`. Both are type imports from `@lena/tool/tool`.
-6. **`provider-config.ts` and `model-config-store.ts`.** ✅ *Done.*
-   - `provider-config.ts` holds the schema and types, and `assertValidProviderConfig(id, config)`: `Value.Check` plus a duplicate-model-id check, throwing with the provider id and the first `Value.Errors` path. The store and `PiAiLLM` both call it.
-   - The two `CREATE TABLE IF NOT EXISTS` statements above are constants, written once in SQL both backends run.
-   - The typebox schema covers `ProviderConfig`: `kind: "foundry"`, `resource`, the auth union, and models with `id`, `api ∈ {openai-responses, openai-completions, anthropic-messages}`, `contextWindow`, `maxTokens`, and optional `reasoning`/`name`. `ProviderConfig`, `ModelConfig` and `AuthConfig` are its `Static<>` types.
-   - `SqlModelConfigStore.load(database)`:
-     1. `database.execute` each `CREATE TABLE IF NOT EXISTS`;
-     2. select both tables, ordered by provider id and each model's saved `position`, so models load in the order they were saved (the round-trip test caught an id-sorted order);
-     3. assemble each provider's rows into a `ProviderConfig` and run `assertValidProviderConfig`; an invalid row throws naming the provider.
-   - `saveProvider(id, config)`: `assertValidProviderConfig` runs first, so invalid input writes nothing. Then it upserts the provider row (`INSERT … ON CONFLICT (id) DO UPDATE`), deletes that provider's model rows and inserts the new ones with their `position`. Removing a model row is config, not an Azure resource. It also updates the store's in-memory providers, so the store never goes stale; `PiAiLLM` still needs rebuilding.
-   - `providers` is its only read surface: the catalog the caller (and later a model picker) chooses from.
-7. **`credential.ts`.** ✅ *Done.*
-   - `interface CredentialProvider { getToken(): Promise<string> }`.
-   - `EntraCredentialProvider(tokenCredential)` wraps `getBearerTokenProvider(credential, FOUNDRY_SCOPE)`.
-   - `createCredentialProviderFromAuthConfig(auth)` is the one switch on auth kind: `ManagedIdentityCredential(clientId ? { clientId } : undefined)` or `ClientSecretCredential` (throws if the secret env is unset), each wrapped in `EntraCredentialProvider`, ending in an exhaustive `never` check.
-8. **Foundry provider, built inside `PiAiLLM`.** ✅ *Done.* `model.ts` and `foundry-provider.ts` are deleted; with one provider kind and one model per `PiAiLLM`, a separate wrapper class added nothing.
-   - The constructor builds the pi-ai `Model<Api>` (`provider: providerId`, `baseUrl` from `foundryBaseUrl`, zero cost, input `["text"]`, limits from the config) and registers it with `createProvider({ id, name: id, auth: { apiKey: { name: id, resolve } }, models: [model], api: { "openai-responses": openAIResponsesApi(), "openai-completions": openAICompletionsApi(), "anthropic-messages": anthropicMessagesApi() } })`, using the `*.lazy` imports.
-   - `foundryBaseUrl(resource, api)`, a helper at the bottom of `index.ts`, builds `https://<res>.services.ai.azure.com/{openai/v1|anthropic}` and throws on any other `api`.
-   - Private `getEntraBearerHeader()` returns `{ auth: { headers: { Authorization: \`Bearer ${token}\` } } }`, so every request carries a fresh token.
-9. **`stream-adapter.ts`.** ✅ *Done.*
-    - `PiAiStreamAdapter(model)` with `toPiContext(request)` and `toLLMEvent(event)`; today's helpers become private methods.
-    - Tools map as `request.tools?.map(({ name, description, parameters }) => ({ name, description, parameters }))`.
-    - Confirm, and test, that a `resolve()` failure (bad secret, MI unavailable) arrives as a pi-ai `error` event and becomes exactly one Lena `error` event, never a throw.
-10. **`index.ts`.** ✅ *Done.* `class PiAiLLM implements LLM`, built for one provider and model the caller chose:
-    - The constructor takes `(providerId, provider, model)`, runs `assertValidProviderConfig` on the provider narrowed to that one model, creates the credential with `createCredentialProviderFromAuthConfig(provider.auth)`, and registers the Foundry provider from step 8 on `createModels()`. It keeps the pi-ai model it built, so there is no `getModel` lookup.
-    - `stream(request)`:
-      1. throw if `request.thinkingLevel` is set and the model isn't configured with `reasoning: true`;
-      2. `new PiAiStreamAdapter(model)`;
-      3. `models.streamSimple(model, adapter.toPiContext(request), { signal, temperature, maxTokens, reasoning: thinkingLevel })`; pi-ai maps the level per protocol (Chat Completions sends `reasoning_effort`);
-      4. map events with `adapter.toLLMEvent`.
-    - No catalog: no `listModels`, no lookup. Switching model means building another `PiAiLLM`; keep one per session and model, since each holds its own credential and token cache.
-11. **Unit test (vitest, in `test/`).** ✅ *Done: 1 passes; `@lena/llm` typechecks.* Kept to one basic test on purpose.
-    - **`llm.test.ts`:** builds a `ProviderConfig` and `ModelConfig`, constructs `PiAiLLM`, streams one request, and expects a single `done` event with the reply text and usage. It fakes only what crosses the network: `getBearerTokenProvider` (via `vi.mock("@azure/identity")`) and the global `fetch`, which returns a canned Chat Completions SSE stream.
-    - Not covered by a unit test: `SqlModelConfigStore`, the other two protocols' URLs and headers, tool mapping, and credential failures.
-    - Open: the Anthropic SDK calls `/anthropic/v1/messages?beta=true`. Only a live Claude call (step 12) shows whether Foundry accepts the query.
-12. **Live test (`test/live.test.ts`, skips without env).** *Removed; to be rewritten when this step runs.* It builds `PiAiLLM` for each model from env (`LLM_ENDPOINT`, resource = first host label, and `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`).
-    - Keeps its shape: `Tool` objects with `execute`, passed as `tools: [tool]`, results from `tool.execute(...)`.
-    - Run {GPT via Responses, DeepSeek via Completions, Claude via Messages} with a service principal against one Foundry resource.
-    - Each case asserts a text reply and one tool-call round trip. The DeepSeek case also asserts `thinking` events; if they are missing, add an optional `compat` to the model schema then.
-    - Managed identity, system- and user-assigned, is run once from an Azure-hosted environment.
-13. **Typecheck and test:** `pnpm --filter @lena/tool test`, `pnpm --filter @lena/datastore test`, `pnpm --filter @lena/llm typecheck && pnpm --filter @lena/llm test`, plus `pnpm --filter @lena/util --filter @lena/datastore --filter @lena/tool --filter @lena/llm typecheck`. A workspace-wide `pnpm -r typecheck` stays red until the agent loop restores session, recce and gateway-agent.
+4. **Move the archived `llm/` into `packages/llm`.** ✅ *Done*, then evolved on pi-ai (`PiAiLLM`, `stream-adapter.ts`, one end-to-end test). Steps 6–11 replace that pi-ai code.
+5. **Remove the model config store.** ✅ *Done.* `model-config-store.ts` and its export are deleted, and so is the `@lena/datastore` dependency. The future config module owns storage.
+6. **Swap dependencies.** ✅ *Done.* Removed `@earendil-works/pi-ai` and `typebox`; added `openai` ^6.49.0. Deleted `provider-config.ts` and `stream-adapter.ts`.
+7. **`types.ts`.** ✅ *Done.* Drop `LLM_APIS`/`LLMApi`. `LLM_THINKING_LEVELS` stays as is, since it matches the SDK's `ReasoningEffort` except `none` (omit `thinkingLevel` instead). Everything else is unchanged.
+8. **`credential.ts`.** ✅ *Done.* `AuthConfig` (the three kinds in decision 4), `FOUNDRY_SCOPE` and `createTokenCredential(auth)`. `CredentialProvider` and `EntraCredentialProvider` go: `createFoundryTokenProvider(credential)` wraps `getBearerTokenProvider` with the Foundry scope and is passed to the client as `apiKey`.
+9. **`responses-adapter.ts`.** ✅ *Done.* `FoundryResponsesAdapter`, one per call:
+   - `createResponseParam(llmRequest, model)` builds the `responses.create` body from the mapping above.
+   - `toLLMEvent(event)` translates one stream event, keeping the text, thinking and tool calls seen so far for `done`.
+   - Beyond the mapping table:
+     - `ToolContent[]` results are sent as `input_text`/`input_image` items, not joined to text, so images reach the model.
+     - `response.incomplete` is `done`/`outputLengthExceeded` only for `max_output_tokens`; any other reason (a content filter) is an `error`.
+     - Tool arguments that aren't a JSON object, and a completed response without usage, throw; `FoundryLLM` turns the throw into an `error` event.
+     - Tool schemas are cast to `Record<string, unknown>`: a typebox schema is plain JSON Schema, and the SDK's type only lacks the index signature.
+     - `toolResult.isError` isn't sent: the Responses API has no such field, so the error has to be in the result text.
+10. **`index.ts`: `FoundryLLM`.** ✅ *Done.*
+    - The constructor throws on an empty `foundryName` or `model`, then builds the `OpenAI` client once: `baseURL` is `https://<foundryName>.services.ai.azure.com/openai/v1`, `apiKey` is `createFoundryTokenProvider(credential)`.
+    - `stream()` calls `responses.create({ ...adapter.createResponseParam(request, model), stream: true, store: false }, { signal })` and yields translated events. It catches SDK errors and yields one `error` event (`aborted` if the signal fired). It stops after the first `done` or `error`, and yields an `error` if the stream ends without one.
+11. **Unit test (one, end to end).** ✅ *Done: passes; `@lena/llm` typechecks.* A fake `TokenCredential` returns `jwt-123`. A stubbed global `fetch` returns a canned Responses SSE stream with a reasoning summary delta, a text delta and `response.completed`. The test checks:
+    - the events are `thinking`, then `done` with text and usage;
+    - the request went to `https://<res>.services.ai.azure.com/openai/v1/responses` with `Authorization: Bearer jwt-123`.
+
+    A one-off capture confirmed the body: `{ model, input, reasoning: { effort: "high", summary: "auto" }, store: false, stream: true }`.
+12. **Live test (skips without env).** Service principal against one Foundry resource, each case a text reply plus one tool-call round trip:
+    - GPT-5.x, with `thinking` events at `thinkingLevel: "high"`;
+    - DeepSeek;
+    - Grok.
+
+    Also confirm that **Cognitive Services OpenAI User** on the resource is the only role needed, and that a Claude deployment fails cleanly with an `error` event. Run system-assigned and user-assigned managed identity once each from an Azure-hosted environment (for example, a Container App with both identities attached), since neither works off Azure.
+13. **Typecheck and test:** `pnpm --filter @lena/tool --filter @lena/datastore --filter @lena/llm typecheck` and `pnpm --filter @lena/llm test`.
+
+## Open questions
+
+- **Claude.** "Any model on Foundry" excludes Claude on this path. Supporting it means a second adapter on the Anthropic SDK and `/anthropic`, picked by a per-model protocol field. Decide before step 12 whether Claude is in v1.
+- **Models without Responses support.** Some catalog models (earlier checks: Mistral, Kimi, Cohere) answered `400 Model not supported` on Responses and only work on Chat Completions. The live test settles which ones Lena needs. A Chat Completions path would be a second adapter on the same `OpenAI` client.
 
 ## Out of scope (noted gaps)
 
-- **Next: the agent loop, built from scratch** (`docs/plan/agent-loop.md`). It replaces the archived agent, picks a provider and model from the store and holds one `PiAiLLM` per session and model, and brings `@lena/session`, `@lena/recce` and `apps/gateway-agent` back to green; they lose `@lena/agent` in step 1.
-- **Moving `@lena/session` onto `@lena/datastore`.** Its two stores collapse into one over `Database`; a plan of its own.
-- **`Database.transaction`, a migration runner, and a backend flag.** Without a transaction, a database error partway through `saveProvider` can leave a provider with only some of its models. Validation runs before any write, so only a failure inside the database can cause this. Add `transaction` when that matters or when session moves over.
-- **Wiring the app:** opening the one `Database` from `MODE` and the connection string at startup, and passing it to every store.
-- **The frontend and API that call `saveProvider`**, and removing a whole provider.
-- **First run with an empty database.** No provider means no model; the frontend's first-run step, or an env seed, fills it.
-- **Hot reload.** Callers rebuild `PiAiLLM` after a save. If a live swap is ever needed, dsh's snapshot-per-config pattern (`adapter.ts current()`) is the reference.
-- **A model listing for the picker.** `store.providers` is the catalog today; add a listing method when the frontend needs one.
-- **Image input** beyond what `ToolContent` replays.
-- **`thinkingLevelMap` per model.** pi-ai's default level mapping is used; add it to `ModelConfig` only if a Foundry deployment rejects a level in the live test.
-- **`Toolbox.list(): Tool[]`.** The loop holds a `Toolbox`, which can't list its tools today; add `list()` when the loop moves onto `@lena/llm`.
+- **The config module**: storing the model and auth method, validating them, and building `FoundryLLM`.
+- **Carrying reasoning across tool calls.** With `store: false`, OpenAI reasoning models drop their reasoning between turns. Replaying it needs `include: ["reasoning.encrypted_content"]` and reasoning items in `LLMMessage`; add it if tool-heavy turns degrade.
+- **Image input in user messages.** Images reach the model only inside tool results today.
+- **Foundry SDK features** (agents, evaluations, Foundry tools such as file search, code interpreter, web search, MCP). Lena runs its own tools.
+- **`Toolbox.list(): Tool[]`**, needed when the loop moves onto `@lena/llm`.
 
 ## Verification
 
-- Steps 11–13 above.
-- The plan is done when:
-  - all unit tests pass, including `@lena/datastore`'s;
-  - the live matrix passes with a service principal;
-  - `@lena/util`, `@lena/datastore`, `@lena/tool` and `@lena/llm` typecheck green.
+- Steps 11–13.
+- Done when the unit test passes, the live matrix passes with a service principal, and `@lena/tool`, `@lena/datastore` and `@lena/llm` typecheck.
 
 ## Sources
 
-- [Foundry endpoints](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/endpoints)
+- [Foundry v1 API](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle)
+- [Foundry SDKs and endpoints](https://learn.microsoft.com/en-us/azure/foundry/how-to/develop/sdk-overview)
 - [Entra ID keyless auth](https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/how-to/configure-entra-id)
-- [Models sold by Azure](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure)
 - [Claude in Microsoft Foundry](https://platform.claude.com/docs/en/build-with-claude/claude-in-microsoft-foundry)
-- dsh reference: `deepseek-harness/packages/llm/llm-pi-ai/src/{provider,adapter,config}.ts`
+- `openai@6.49.0` `resources/shared.d.ts` (`ReasoningEffort`)

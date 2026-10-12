@@ -45,3 +45,5 @@ In test files, the `test(...)` cases come first and their helper functions below
   object or a `type` of functions. Its contract is an `interface` the class `implements`.
 - Pure data shapes with no behaviour are a `type`.
 - Plain functions only for single, stateless operations.
+- Inside a function body, a blank line separates each step: input checks, derived values, then the
+  work itself.

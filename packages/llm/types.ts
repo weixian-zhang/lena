@@ -1,19 +1,11 @@
 import type { Tool, ToolContent } from "@lena/tool/tool";
 
 /**
- * Lena's own LLM surface. Callers depend on these types, never on pi-ai's —
- * `stream-adapter.ts` is where the two meet.
+ * Lena's own LLM surface. Callers depend on these types, never on the OpenAI SDK's —
+ * `responses-adapter.ts` is where the two meet.
  */
 
-/** Wire protocols a configured model can speak; pi-ai routes each to its own SDK. */
-export const LLM_APIS = [
-  "openai-responses",
-  "openai-completions",
-  "anthropic-messages",
-] as const;
-export type LLMApi = (typeof LLM_APIS)[number];
-
-/** How hard a reasoning model thinks; mirrors pi-ai's levels, mapped per protocol by pi-ai. */
+/** How hard a reasoning model thinks; sent as the Responses API's `reasoning.effort`. */
 export const LLM_THINKING_LEVELS = [
   "minimal",
   "low",
@@ -55,7 +47,7 @@ export type LLMRequest = {
   signal?: AbortSignal;
   temperature?: number;
   maxTokens?: number;
-  /** Omitted: the provider's default. Only for models configured with `reasoning: true`. */
+  /** Omitted: the deployment's default. A deployment that can't reason rejects it with an `error` event. */
   thinkingLevel?: LLMThinkingLevel;
 };
 
@@ -64,13 +56,13 @@ export type LLMUsage = { input: number; output: number; total: number };
 /**
  * Why the model stopped. `toolUse` means it is waiting on the tool calls in the
  * `done` event; the caller runs them and sends the results back as `toolResult`
- * messages.
+ * messages. `outputLengthExceeded` means the reply was cut off at `maxTokens` or the deployment's limit.
  */
-export type LLMStopReason = "stop" | "length" | "toolUse";
+export type LLMStopReason = "stop" | "outputLengthExceeded" | "toolUse";
 
 /**
  * Output of one model call. Exactly one terminal event — `done` or `error` —
- * ends every stream; `done.text` excludes thinking, which arrives separately.
+ * ends every stream; `done.text` excludes thinking, which `done.thinking` holds in full.
  */
 export type LLMEvent =
   | { type: "thinking"; text: string }
@@ -79,6 +71,8 @@ export type LLMEvent =
       type: "done";
       reason: LLMStopReason;
       text: string;
+      /** All `thinking` deltas joined, parts separated by a blank line; a summary for OpenAI models. */
+      thinking: string;
       toolCalls: LLMToolCall[];
       usage: LLMUsage;
     }
