@@ -23,7 +23,7 @@ export class SqlModelConfigStore implements ModelConfigStore {
       "SELECT id, kind, resource, auth FROM llm_providers ORDER BY id",
     );
     const modelRows = await database.query<ModelRow>(
-      "SELECT provider_id, id, name, api, context_window, max_tokens, reasoning, tools FROM llm_models ORDER BY provider_id, position",
+      "SELECT provider_id, id, name, api, context_window, max_tokens, reasoning FROM llm_models ORDER BY provider_id, position",
     );
 
     const providers = new Map<string, ProviderConfig>();
@@ -66,8 +66,8 @@ export class SqlModelConfigStore implements ModelConfigStore {
     );
     for (const [position, model] of config.models.entries()) {
       await this.database.execute(
-        "INSERT INTO llm_models (provider_id, position, id, name, api, context_window, max_tokens, reasoning, tools) " +
-          "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        "INSERT INTO llm_models (provider_id, position, id, name, api, context_window, max_tokens, reasoning) " +
+          "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         [
           id,
           position,
@@ -77,7 +77,6 @@ export class SqlModelConfigStore implements ModelConfigStore {
           model.contextWindow,
           model.maxTokens,
           model.reasoning ? 1 : 0,
-          model.tools ? 1 : 0,
         ],
       );
     }
@@ -102,7 +101,6 @@ const CREATE_MODELS_TABLE = `CREATE TABLE IF NOT EXISTS llm_models (
   context_window  INTEGER NOT NULL,
   max_tokens      INTEGER NOT NULL,
   reasoning       INTEGER NOT NULL,
-  tools           INTEGER NOT NULL,
   PRIMARY KEY (provider_id, id)
 )`;
 
@@ -116,7 +114,6 @@ type ModelRow = {
   context_window: number;
   max_tokens: number;
   reasoning: number;
-  tools: number;
 };
 
 function toModelConfig(row: ModelRow): unknown {
@@ -127,7 +124,6 @@ function toModelConfig(row: ModelRow): unknown {
     contextWindow: row.context_window,
     maxTokens: row.max_tokens,
     reasoning: row.reasoning === 1,
-    tools: row.tools === 1,
   };
 }
 

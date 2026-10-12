@@ -71,9 +71,9 @@ Lena needs an LLM module modelled on DeepSeek Harness's `packages/llm/llm-pi-ai`
    - an unknown provider, model, `kind` or `api`;
    - a duplicate model id;
    - a missing secret env var;
-   - a tools request to a `tools: false` model.
+   - a thinking level requested from a model not configured with `reasoning: true`.
 
-   `contextWindow`, `maxTokens` and `tools` are required per model; today's silent `CONTEXT_WINDOW_TOKENS` fallback is removed.
+   `contextWindow` and `maxTokens` are required per model; today's silent `CONTEXT_WINDOW_TOKENS` fallback is removed.
 7. **Tools are `@lena/tool`'s `Tool`** (`packages/tool/tool.ts`); `@lena/llm`'s workspace dependencies are `@lena/tool` and `@lena/datastore`.
    - `LLMRequest.tools` is `readonly Tool[]`; tool results use `ToolContent`. Both are type imports from `@lena/tool/tool`, so the tool index and its built-ins never load.
    - The adapter maps each `Tool` to `{ name, description, parameters }`, so `execute` never reaches pi-ai and the `toJson()` round trip goes.
@@ -171,7 +171,6 @@ CREATE TABLE IF NOT EXISTS llm_models (
   context_window  INTEGER NOT NULL,
   max_tokens      INTEGER NOT NULL,
   reasoning       INTEGER NOT NULL,   -- 0/1
-  tools           INTEGER NOT NULL,   -- 0/1
   PRIMARY KEY (provider_id, id)
 );
 ```
@@ -185,9 +184,9 @@ The same configuration as one `ProviderConfig` value, the shape `saveProvider` t
   "auth": { "kind": "managedIdentity", "clientId": "<optional user-assigned>" },
   // | { "kind": "servicePrincipal", "tenantId": "…", "clientId": "…", "clientSecretEnv": "AZURE_CLIENT_SECRET" }
   "models": [
-    { "id": "gpt-5.5", "api": "openai-responses", "contextWindow": 1050000, "maxTokens": 128000, "reasoning": true, "tools": true },
-    { "id": "claude-sonnet-5-5", "api": "anthropic-messages", "contextWindow": 1000000, "maxTokens": 64000, "tools": true },
-    { "id": "DeepSeek-V4-Pro", "api": "openai-completions", "contextWindow": 1000000, "maxTokens": 384000, "reasoning": true, "tools": true }
+    { "id": "gpt-5.5", "api": "openai-responses", "contextWindow": 1050000, "maxTokens": 128000, "reasoning": true },
+    { "id": "claude-sonnet-5-5", "api": "anthropic-messages", "contextWindow": 1000000, "maxTokens": 64000 },
+    { "id": "DeepSeek-V4-Pro", "api": "openai-completions", "contextWindow": 1000000, "maxTokens": 384000, "reasoning": true }
   ]
 }
 ```
@@ -206,7 +205,7 @@ class SqlModelConfigStore implements ModelConfigStore {
 }
 // usage: the caller picks from store.providers, then new PiAiLLM(providerId, provider, model);
 //        keep one per session and model so the credential's token cache is reused
-// LLMRequest carries no model; tools?: readonly Tool[]
+// LLMRequest carries no model; tools?: readonly Tool[]; thinkingLevel?: LLMThinkingLevel
 ```
 
 Following Lena's CLAUDE.md:
@@ -238,11 +237,12 @@ Following Lena's CLAUDE.md:
 5. **`types.ts`: data types only.** ✅ *Done.*
    - Drop `FoundryAuth`.
    - `LLM_APIS` (with `LLMApi`) lists the three protocols once; the schema's `Type.Enum` uses it. `LLMRequest` names no model: the `LLM` is built for one.
+   - `LLM_THINKING_LEVELS` (with `LLMThinkingLevel`) copies pi-ai's levels: `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. `LLMRequest.thinkingLevel?` picks one; omitted means the provider's default.
    - `LLMRequest.tools` becomes `readonly Tool[]`; `toolResult.content` stays `string | ToolContent[]`. Both are type imports from `@lena/tool/tool`.
 6. **`provider-config.ts` and `model-config-store.ts`.** ✅ *Done.*
    - `provider-config.ts` holds the schema and types, and `assertValidProviderConfig(id, config)`: `Value.Check` plus a duplicate-model-id check, throwing with the provider id and the first `Value.Errors` path. The store and `PiAiLLM` both call it.
    - The two `CREATE TABLE IF NOT EXISTS` statements above are constants, written once in SQL both backends run.
-   - The typebox schema covers `ProviderConfig`: `kind: "foundry"`, `resource`, the auth union, and models with `id`, `api ∈ {openai-responses, openai-completions, anthropic-messages}`, `contextWindow`, `maxTokens`, `tools`, and optional `reasoning`/`name`. `ProviderConfig`, `ModelConfig` and `AuthConfig` are its `Static<>` types.
+   - The typebox schema covers `ProviderConfig`: `kind: "foundry"`, `resource`, the auth union, and models with `id`, `api ∈ {openai-responses, openai-completions, anthropic-messages}`, `contextWindow`, `maxTokens`, and optional `reasoning`/`name`. `ProviderConfig`, `ModelConfig` and `AuthConfig` are its `Static<>` types.
    - `SqlModelConfigStore.load(database)`:
      1. `database.execute` each `CREATE TABLE IF NOT EXISTS`;
      2. select both tables, ordered by provider id and each model's saved `position`, so models load in the order they were saved (the round-trip test caught an id-sorted order);
@@ -264,9 +264,9 @@ Following Lena's CLAUDE.md:
 10. **`index.ts`.** ✅ *Done.* `class PiAiLLM implements LLM`, built for one provider and model the caller chose:
     - The constructor takes `(providerId, provider, model)`, runs `assertValidProviderConfig` on the provider narrowed to that one model, creates the credential with `createCredentialProviderFromAuthConfig(provider.auth)`, and registers the Foundry provider from step 8 on `createModels()`. It keeps the pi-ai model it built, so there is no `getModel` lookup.
     - `stream(request)`:
-      1. throw if `request.tools?.length` and the model has `tools: false`;
+      1. throw if `request.thinkingLevel` is set and the model isn't configured with `reasoning: true`;
       2. `new PiAiStreamAdapter(model)`;
-      3. `models.streamSimple(model, adapter.toPiContext(request), { signal, temperature, maxTokens })`;
+      3. `models.streamSimple(model, adapter.toPiContext(request), { signal, temperature, maxTokens, reasoning: thinkingLevel })`; pi-ai maps the level per protocol (Chat Completions sends `reasoning_effort`);
       4. map events with `adapter.toLLMEvent`.
     - No catalog: no `listModels`, no lookup. Switching model means building another `PiAiLLM`; keep one per session and model, since each holds its own credential and token cache.
 11. **Unit test (vitest, in `test/`).** ✅ *Done: 1 passes; `@lena/llm` typechecks.* Kept to one basic test on purpose.
@@ -290,7 +290,8 @@ Following Lena's CLAUDE.md:
 - **First run with an empty database.** No provider means no model; the frontend's first-run step, or an env seed, fills it.
 - **Hot reload.** Callers rebuild `PiAiLLM` after a save. If a live swap is ever needed, dsh's snapshot-per-config pattern (`adapter.ts current()`) is the reference.
 - **A model listing for the picker.** `store.providers` is the catalog today; add a listing method when the frontend needs one.
-- **Reasoning-effort selection, and image input** beyond what `ToolContent` replays.
+- **Image input** beyond what `ToolContent` replays.
+- **`thinkingLevelMap` per model.** pi-ai's default level mapping is used; add it to `ModelConfig` only if a Foundry deployment rejects a level in the live test.
 - **`Toolbox.list(): Tool[]`.** The loop holds a `Toolbox`, which can't list its tools today; add `list()` when the loop moves onto `@lena/llm`.
 
 ## Verification

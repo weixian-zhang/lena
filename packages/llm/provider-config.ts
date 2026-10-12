@@ -58,7 +58,6 @@ const ModelConfigSchema = Type.Object(
     contextWindow: Type.Integer({ minimum: 1 }),
     maxTokens: Type.Integer({ minimum: 1 }),
     reasoning: Type.Optional(Type.Boolean()),
-    tools: Type.Boolean(),
   },
   { additionalProperties: false },
 );

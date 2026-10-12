@@ -13,6 +13,17 @@ export const LLM_APIS = [
 ] as const;
 export type LLMApi = (typeof LLM_APIS)[number];
 
+/** How hard a reasoning model thinks; mirrors pi-ai's levels, mapped per protocol by pi-ai. */
+export const LLM_THINKING_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+export type LLMThinkingLevel = (typeof LLM_THINKING_LEVELS)[number];
+
 /** A tool invocation the model asked for. */
 export type LLMToolCall = {
   id: string;
@@ -44,6 +55,8 @@ export type LLMRequest = {
   signal?: AbortSignal;
   temperature?: number;
   maxTokens?: number;
+  /** Omitted: the provider's default. Only for models configured with `reasoning: true`. */
+  thinkingLevel?: LLMThinkingLevel;
 };
 
 export type LLMUsage = { input: number; output: number; total: number };

@@ -29,13 +29,14 @@ export type {
   ModelConfig,
   ProviderConfig,
 } from "./provider-config.js";
-export { LLM_APIS } from "./types.js";
+export { LLM_APIS, LLM_THINKING_LEVELS } from "./types.js";
 export type {
   LLMApi,
   LLMEvent,
   LLMMessage,
   LLMRequest,
   LLMStopReason,
+  LLMThinkingLevel,
   LLMToolCall,
   LLMUsage,
 } from "./types.js";
@@ -57,9 +58,9 @@ export class PiAiLLM implements LLM {
 
   /** Validates the config, then registers a pi-ai provider holding only the chosen model. */
   constructor(
-    private readonly providerId: string,
+    providerId: string,
     provider: ProviderConfig,
-    private readonly modelConfig: ModelConfig,
+    modelConfig: ModelConfig,
   ) {
     assertValidProviderConfig(providerId, {
       ...provider,
@@ -104,9 +105,9 @@ export class PiAiLLM implements LLM {
   }
 
   async *stream(request: LLMRequest): AsyncGenerator<LLMEvent, void> {
-    if (request.tools?.length && !this.modelConfig.tools) {
+    if (request.thinkingLevel && !this.model.reasoning) {
       throw new Error(
-        `Model "${this.modelConfig.id}" on provider "${this.providerId}" cannot call tools, but the request offers some.`,
+        `Model "${this.model.id}" on provider "${this.model.provider}" is not configured for reasoning, but the request asks for thinking level "${request.thinkingLevel}".`,
       );
     }
 
@@ -118,6 +119,7 @@ export class PiAiLLM implements LLM {
         signal: request.signal,
         temperature: request.temperature,
         maxTokens: request.maxTokens,
+        reasoning: request.thinkingLevel,
       },
     );
 
