@@ -1,0 +1,24 @@
+{
+  "name": "@lena/llm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./*": "./*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@azure/identity": "^4.13.1",
+    "@lena/tool": "workspace:*",
+    "openai": "^6.49.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,24 +1,20 @@
-import type { Toolbox, ToolContent } from "@lena/tool";
+import type { Tool, ToolContent } from "@lena/tool/tool";
 
 /**
- * Lena's own LLM surface. Callers depend on these types, never on pi-ai's —
- * `stream-adapter.ts` is where the two meet.
+ * Lena's own LLM surface. Callers depend on these types, never on the OpenAI SDK's —
+ * `responses-adapter.ts` is where the two meet.
  */
 
-/**
- * How to authenticate against Foundry. The caller picks one — typically from a
- * UI — because each option carries its own credentials.
- */
-export type FoundryAuth =
-  /** A Foundry API key. Simplest, but a secret to store and rotate. */
-  | { kind: "apiKey"; key: string }
-  /** An Entra service principal. The usual choice for local development. */
-  | { kind: "servicePrincipal"; tenantId: string; clientId: string; clientSecret: string }
-  /** The hosting service's system-assigned managed identity. No secret to store. */
-  | { kind: "systemAssignedManagedIdentity" }
-  /** A user's token from an `az login --use-device-code` sign-in done elsewhere.
-   *  Must already be scoped to Foundry — a token for ARM looks identical here. */
-  | { kind: "deviceCodeUserToken"; token: string };
+/** How hard a reasoning model thinks; sent as the Responses API's `reasoning.effort`. */
+export const LLM_THINKING_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+export type LLMThinkingLevel = (typeof LLM_THINKING_LEVELS)[number];
 
 /** A tool invocation the model asked for. */
 export type LLMToolCall = {
@@ -43,14 +39,16 @@ export type LLMMessage =
       isError: boolean;
     };
 
-/** One model call. */
+/** One model call, on the model the `LLM` was built for. */
 export type LLMRequest = {
   systemPrompt?: string;
   messages: LLMMessage[];
-  tools?: Toolbox;
+  tools?: readonly Tool[];
   signal?: AbortSignal;
   temperature?: number;
   maxTokens?: number;
+  /** Omitted: the deployment's default. A deployment that can't reason rejects it with an `error` event. */
+  thinkingLevel?: LLMThinkingLevel;
 };
 
 export type LLMUsage = { input: number; output: number; total: number };
@@ -58,13 +56,13 @@ export type LLMUsage = { input: number; output: number; total: number };
 /**
  * Why the model stopped. `toolUse` means it is waiting on the tool calls in the
  * `done` event; the caller runs them and sends the results back as `toolResult`
- * messages.
+ * messages. `outputLengthExceeded` means the reply was cut off at `maxTokens` or the deployment's limit.
  */
-export type LLMStopReason = "stop" | "length" | "toolUse";
+export type LLMStopReason = "stop" | "outputLengthExceeded" | "toolUse";
 
 /**
  * Output of one model call. Exactly one terminal event — `done` or `error` —
- * ends every stream; `done.text` excludes thinking, which arrives separately.
+ * ends every stream; `done.text` excludes thinking, which `done.thinking` holds in full.
  */
 export type LLMEvent =
   | { type: "thinking"; text: string }
@@ -73,6 +71,8 @@ export type LLMEvent =
       type: "done";
       reason: LLMStopReason;
       text: string;
+      /** All `thinking` deltas joined, parts separated by a blank line; a summary for OpenAI models. */
+      thinking: string;
       toolCalls: LLMToolCall[];
       usage: LLMUsage;
     }

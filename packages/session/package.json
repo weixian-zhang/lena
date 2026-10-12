@@ -11,7 +11,6 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@lena/agent": "workspace:*",
     "@lena/gateway": "workspace:*",
     "better-sqlite3": "^12.11.1",
     "pg": "^8.22.0"

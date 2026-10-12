@@ -15,7 +15,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@lena/agent": "workspace:*",
     "@lena/session": "workspace:*",
     "@lena/util": "workspace:*",
     "@mariozechner/pi-agent-core": "^0.73.1",
