@@ -1,45 +1,65 @@
-import { Type } from "typebox";
-import { expect, test } from "vitest";
-import { DefaultToolbox } from "../toolbox.js";
-import type { Tool } from "../tool.js";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, expect, test } from "vitest";
+import { StandardToolbox } from "../toolbox.js";
 
-test("toJson keeps the order the tools were given", () => {
-  const toolbox = new DefaultToolbox([echoTool("a"), echoTool("b")]);
+/** Temp directories made by `toolboxInTempDir`, removed after each test. */
+const tempDirs: string[] = [];
 
-  expect(JSON.parse(toolbox.toJson()).map((tool: { name: string }) => tool.name)).toEqual(["a", "b"]);
+afterEach(async () => {
+  await Promise.all(
+    tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  );
 });
 
-test("get returns the tool by name and it runs", async () => {
-  const toolbox = new DefaultToolbox([echoTool("echo")]);
+test("toJson lists every built-in tool once, in a fixed order", async () => {
+  const { toolbox } = await toolboxInTempDir();
 
-  expect(await toolbox.get("echo").execute({ text: "hi" })).toBe("echo: hi");
+  expect(
+    JSON.parse(toolbox.toJson()).map((tool: { name: string }) => tool.name),
+  ).toEqual([
+    "bash",
+    "azure_cli_generate",
+    "read",
+    "read_media",
+    "write",
+    "edit",
+  ]);
 });
 
-test("get throws naming an unknown tool", () => {
-  const toolbox = new DefaultToolbox([echoTool("echo")]);
+test("get returns a built-in tool working in the toolbox's workDir", async () => {
+  const { toolbox, workDir } = await toolboxInTempDir();
+  await writeFile(join(workDir, "notes.txt"), "alpha\n");
+
+  expect(await toolbox.get("read").execute({ path: "notes.txt" })).toContain(
+    "1\talpha",
+  );
+});
+
+test("get throws naming an unknown tool", async () => {
+  const { toolbox } = await toolboxInTempDir();
 
   expect(() => toolbox.get("missing")).toThrow('Unknown tool: "missing".');
 });
 
-test("two tools with the same name are rejected", () => {
-  expect(() => new DefaultToolbox([echoTool("echo"), echoTool("echo")])).toThrow('Duplicate tool name: "echo".');
+test("toJson describes each tool without its execute function", async () => {
+  const { toolbox } = await toolboxInTempDir();
+
+  for (const tool of JSON.parse(toolbox.toJson())) {
+    expect(Object.keys(tool)).toEqual(["name", "description", "parameters"]);
+  }
 });
 
-test("toJson describes each tool without its execute function", () => {
-  const tool = echoTool("echo");
-
-  expect(JSON.parse(new DefaultToolbox([tool]).toJson())).toEqual([
-    { name: "echo", description: tool.description, parameters: tool.parameters },
-  ]);
-});
-
-function echoTool(name: string): Tool {
-  const parameters = Type.Object({ text: Type.String() });
-  const tool: Tool<typeof parameters> = {
-    name,
-    description: "Echo the text back.",
-    parameters,
-    execute: async ({ text }) => `${name}: ${text}`,
+/** No tool here runs `bash`, so the Azure login is never used. */
+async function toolboxInTempDir(): Promise<{
+  toolbox: StandardToolbox;
+  workDir: string;
+}> {
+  const workDir = await mkdtemp(join(tmpdir(), "lena-toolbox-"));
+  tempDirs.push(workDir);
+  return {
+    toolbox: new StandardToolbox(workDir, { kind: "managedIdentity" }),
+    workDir,
   };
-  return tool;
 }

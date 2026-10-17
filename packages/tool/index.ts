@@ -6,6 +6,6 @@ export { ReadTool } from "./builtin/file/read.js";
 export { EditTool } from "./builtin/file/edit.js";
 export { ReadMediaTool } from "./builtin/file/read-media.js";
 export { WriteTool } from "./builtin/file/write.js";
-export { DefaultToolbox } from "./toolbox.js";
+export { StandardToolbox } from "./toolbox.js";
 export type { Toolbox } from "./toolbox.js";
 export type { Tool, ToolContent } from "./tool.js";
