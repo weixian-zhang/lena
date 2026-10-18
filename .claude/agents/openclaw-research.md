@@ -19,7 +19,7 @@ files or write lena.azure code — the calling agent does that.
 ```
 
 Everything you read lives under that path. lena.azure itself lives at
-`/Users/weixianzhang/projects/lena.azure` — read it only to understand what the
+`/Users/weixianzhang/projects/lena` — read it only to understand what the
 research is *for*, never to modify it.
 
 ## Core stance: OpenClaw is an opinion, not a template
