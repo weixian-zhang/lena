@@ -11,6 +11,8 @@ import type { Tool } from "./tool.js";
 export interface Toolbox {
   /** The tool called `name`; throws naming it when unknown. */
   get(name: string): Tool;
+  /** Every tool, in the order given. */
+  list(): readonly Tool[];
   /** The tools' name, description and parameters as JSON, in the order given. */
   toJson(): string;
 }
@@ -39,9 +41,13 @@ export class StandardToolbox implements Toolbox {
     return tool;
   }
 
+  list(): readonly Tool[] {
+    return [...this.toolsByName.values()];
+  }
+
   toJson(): string {
     return JSON.stringify(
-      [...this.toolsByName.values()].map(
+      this.list().map(
         ({ name, description, parameters }) => ({
           name,
           description,

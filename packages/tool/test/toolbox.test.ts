@@ -28,6 +28,19 @@ test("toJson lists every built-in tool once, in a fixed order", async () => {
   ]);
 });
 
+test("list returns every built-in tool once, in the order given", async () => {
+  const { toolbox } = await toolboxInTempDir();
+
+  expect(toolbox.list().map((tool) => tool.name)).toEqual([
+    "bash",
+    "azure_cli_generate",
+    "read",
+    "read_media",
+    "write",
+    "edit",
+  ]);
+});
+
 test("get returns a built-in tool working in the toolbox's workDir", async () => {
   const { toolbox, workDir } = await toolboxInTempDir();
   await writeFile(join(workDir, "notes.txt"), "alpha\n");

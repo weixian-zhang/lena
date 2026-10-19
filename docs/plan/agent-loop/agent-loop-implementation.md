@@ -7,7 +7,7 @@ session module are black boxes: the session key is a plain string, history is in
 
 Each step leaves typecheck and tests green before the next starts.
 
-## 1. `Toolbox.list()` in `@lena/tool`
+## 1. `Toolbox.list()` in `@lena/tool` — done
 
 - `packages/tool/toolbox.ts`: add `list(): readonly Tool[]` to `Toolbox`, and implement it in
   `StandardToolbox` as `[...this.toolsByName.values()]`, which keeps insertion order.
