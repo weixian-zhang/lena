@@ -52,18 +52,9 @@ importers:
         specifier: ^1.3.7
         version: 1.3.7
     devDependencies:
-      '@types/node':
-        specifier: ^24.3.0
-        version: 24.13.3
-      typescript:
-        specifier: ^5.9.0
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@types/node@24.13.3)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.0))
-
-  packages/config:
-    devDependencies:
+      '@lena/system-config':
+        specifier: workspace:*
+        version: link:../system-config
       '@types/node':
         specifier: ^24.3.0
         version: 24.13.3
@@ -167,6 +158,18 @@ importers:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
+
+  packages/system-config:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.3.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@24.13.3)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.0))
 
   packages/tool:
     dependencies:

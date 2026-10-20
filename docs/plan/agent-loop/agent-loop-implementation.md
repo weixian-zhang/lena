@@ -48,10 +48,10 @@ SessionRunner (again)
   `AgentCommand` (each kind carries `sessionKey`; `QuestionAnswer` is a placeholder until
   `ask_user`), and `Mailroom`. Shapes are in `agent-loop.md` → Contracts.
 
-## 4. `loop.ts` + `test/loop.test.ts`
+## 4. `loop.ts` + `test/loop.test.ts` — done
 
 - `class AgentLoop`: the constructor takes the `AgentContext`. `runTurn(turn: TurnInput)` is at the
-  top, with private methods below: `streamModelCall()` (forwards `LLMEvent`s, returns `done` or the
+  top, with private methods below: `streamLLM()` (forwards `LLMEvent`s, returns `done` or the
   error), `runToolCall()` (`toolbox.get`, `Value.Check`/`Value.Errors` from `typebox/value`,
   `execute(args, signal)`; any failure becomes an `isError` result) and `closeDanglingToolCalls()`.
   Every message is appended to `context.history` as it happens; `turn_end` carries the `answer`.

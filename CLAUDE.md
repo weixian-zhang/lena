@@ -38,12 +38,16 @@ Build what was asked and nothing beyond it. Keep implementations simple and conc
 
 Exported functions and types at the top, private helpers at the bottom.
 In test files, the `test(...)` cases come first and their helper functions below them.
+Group the cases by kind with `describe`.
 
 ## TypeScript conventions
 
 - Code that holds state or groups more than one related function is a class, not an exported
   object or a `type` of functions. Its contract is an `interface` the class `implements`.
 - Pure data shapes with no behaviour are a `type`.
+- Write the type on every variable that is not a primitive, e.g.
+  `const request: LLMRequest = { ... }`. Skip it only when the line already names the type
+  (`new Foo()`).
 - Plain functions only for single, stateless operations.
 - Inside a function body, a blank line separates each step: input checks, derived values, then the
   work itself.

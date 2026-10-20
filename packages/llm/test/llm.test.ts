@@ -1,6 +1,6 @@
 import type { TokenCredential } from "@azure/identity";
 import { afterEach, expect, test, vi } from "vitest";
-import { FoundryLLM } from "../index.js";
+import { FoundryLLM } from "../llm.js";
 import type { LLMEvent } from "../types.js";
 
 afterEach(() => {
