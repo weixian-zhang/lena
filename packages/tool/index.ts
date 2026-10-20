@@ -1,5 +1,4 @@
 export { AzureCliGenerateTool } from "./builtin/azure-cli.js";
-export { azurePricingTool } from "./pricing.js";
 export { AzureShellTool } from "./builtin/azure-shell.js";
 export type { AzureLogin } from "./builtin/helper/authenticated-shell.js";
 export { ReadTool } from "./builtin/file/read.js";

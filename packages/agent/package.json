@@ -12,7 +12,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@lena/gateway": "workspace:*",
     "@lena/llm": "workspace:*",
     "@lena/tool": "workspace:*",
     "typebox": "^1.3.7"

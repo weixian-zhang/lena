@@ -42,9 +42,6 @@ importers:
 
   packages/agent:
     dependencies:
-      '@lena/gateway':
-        specifier: workspace:*
-        version: link:../gateway
       '@lena/llm':
         specifier: workspace:*
         version: link:../llm
